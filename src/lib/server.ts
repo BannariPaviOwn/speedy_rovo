@@ -18,7 +18,7 @@ export async function createClient() {
   const key = publishableKey();
   if (!url || !key) {
     throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or Supabase publishable key in .env.local",
+      "Missing NEXT_PUBLIC_SUPABASE_URL or a Supabase publishable key (NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY). Add them in .env.local locally or in Vercel → Project → Settings → Environment Variables.",
     );
   }
 

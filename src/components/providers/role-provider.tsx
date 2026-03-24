@@ -8,7 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { Session, User } from "@supabase/supabase-js";
+import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 import { signOutAction } from "@/app/auth/actions";
 import { createClient } from "@/lib/client";
 import { fetchStaffContext } from "@/lib/db/staff-queries";
@@ -28,18 +28,30 @@ type RoleContextValue = {
 const RoleContext = createContext<RoleContextValue | null>(null);
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-  const supabase = useMemo(() => createClient(), []);
+  /** Created in `useEffect` only so `next build` prerender never calls `createClient()` (no env on CI until Vercel vars are set). */
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<AdminRole | null>(null);
   const [venueId, setVenueId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    try {
+      setSupabase(createClient());
+    } catch {
+      setLoading(false);
+    }
+  }, []);
+
   const applyUser = useCallback(
     async (u: User | null) => {
       if (!u) {
         setRole(null);
         setVenueId(null);
+        return;
+      }
+      if (!supabase) {
         return;
       }
       try {
@@ -55,6 +67,10 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
     let cancelled = false;
 
     void (async () => {

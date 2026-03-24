@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { useEffect, useState } from "react";
 import { LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/client";
@@ -13,13 +14,26 @@ import {
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    try {
+      setSupabase(createClient());
+    } catch {
+      setError(
+        "This deployment is missing Supabase settings. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in Vercel (or .env.local locally).",
+      );
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    if (!supabase) {
+      return;
+    }
     setPending(true);
     try {
       const fd = new FormData(e.currentTarget);
@@ -128,7 +142,7 @@ export default function LoginPage() {
 
           <Button
             type="submit"
-            disabled={pending}
+            disabled={pending || !supabase}
             className="w-full rounded-xl bg-[var(--accent)] py-6 text-base font-bold text-[var(--accent-foreground)] hover:brightness-105 disabled:opacity-60"
           >
             {pending ? "Signing in…" : "Sign in"}

@@ -1,5 +1,6 @@
 "use client";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { resolveSlotEditorUsernames } from "@/app/(app)/slots/actions";
 import { ScheduleGrid } from "@/components/slots/schedule-grid";
@@ -42,7 +43,7 @@ type ScheduleVenuesState =
   | { status: "ready"; venues: { id: string; name: string }[] };
 
 export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) {
-  const supabase = useMemo(() => createClient(), []);
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const {
     session,
     user,
@@ -60,6 +61,17 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [usingRemote, setUsingRemote] = useState(false);
+
+  useEffect(() => {
+    try {
+      setSupabase(createClient());
+    } catch {
+      setError(
+        "Missing Supabase configuration. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (e.g. in Vercel environment variables).",
+      );
+      setLoading(false);
+    }
+  }, []);
 
   const [scheduleVenues, setScheduleVenues] =
     useState<ScheduleVenuesState>({ status: "inactive" });
@@ -97,6 +109,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
 
   /** Load venue list for admin + superadmin */
   useEffect(() => {
+    if (!supabase) {
+      return;
+    }
     if (authLoading || !session) {
       setScheduleVenues((prev) =>
         prev.status === "inactive" ? prev : { status: "inactive" },
@@ -146,6 +161,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
 
   /** Admin: show venue name next to schedule */
   useEffect(() => {
+    if (!supabase) {
+      return;
+    }
     if (authLoading || role !== "admin" || !staffVenueId) {
       setAdminVenueName(null);
       return;
@@ -170,7 +188,11 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     if (authLoading) {
       return;
     }
+    if (!supabase) {
+      return;
+    }
 
+    const sb = supabase;
     let cancelled = false;
 
     async function run() {
@@ -257,7 +279,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
 
       try {
         const slotWindow = await fetchVenueScheduleWindow(
-          supabase,
+          sb,
           filter.venueId,
         );
         const startH =
@@ -266,11 +288,11 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         if (!cancelled) {
           setVenueSlotWindow({ startHour: startH, endHour: endH });
         }
-        const remoteCourts = await fetchCourtsForSchedule(supabase, filter);
+        const remoteCourts = await fetchCourtsForSchedule(sb, filter);
         const courtList =
           remoteCourts.length > 0 ? remoteCourts : mockCourts;
         const grid = await loadScheduleForDate(
-          supabase,
+          sb,
           slotDate,
           courtList,
           filter,
@@ -320,6 +342,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   const [slugMap, setSlugMap] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
+    if (!supabase) {
+      return;
+    }
     if (authLoading || !session || !isStaff || !scheduleFilter?.venueId) {
       setSlugMap(new Map());
       return;
@@ -455,6 +480,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     const filter = scheduleFilter;
     if (!filter?.venueId) {
       setError("No venue scope — cannot save. Admins need a venue; superadmins must pick a venue.");
+      return;
+    }
+    if (!supabase) {
       return;
     }
 
