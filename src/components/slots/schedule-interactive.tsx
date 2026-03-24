@@ -25,12 +25,7 @@ import {
   SCHEDULE_END_HOUR,
   SCHEDULE_START_HOUR,
 } from "@/lib/schedule-config";
-import {
-  buildMockScheduleGrid,
-  mockCourts,
-  type CourtInfo,
-  type ScheduleCell,
-} from "@/lib/mock-schedule";
+import type { CourtInfo, ScheduleCell } from "@/lib/mock-schedule";
 
 type ScheduleInteractiveProps = {
   selectedDate: Date;
@@ -53,9 +48,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   } = useRole();
   const isStaff = role === "admin" || role === "superadmin";
 
-  const [courts, setCourts] = useState<CourtInfo[]>(mockCourts);
-  const [cells, setCells] = useState<Map<string, ScheduleCell>>(() =>
-    buildMockScheduleGrid(),
+  const [courts, setCourts] = useState<CourtInfo[]>([]);
+  const [cells, setCells] = useState<Map<string, ScheduleCell>>(
+    () => new Map(),
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -202,13 +197,13 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
 
       if (!session || !isStaff) {
         setVenueSlotWindow(null);
-        setCourts(mockCourts);
-        setCells(buildMockScheduleGrid());
+        setCourts([]);
+        setCells(new Map());
         setUsingRemote(false);
         setInfo(
           !session
             ? "Sign in with your staff username (admin or superadmin) to load and edit the live schedule."
-            : "This account is not in staff_roles. You can browse the preview grid only; contact a superadmin for access.",
+            : "This account is not in staff_roles. Contact a superadmin for access.",
         );
         if (!cancelled) {
           setLoading(false);
@@ -218,8 +213,8 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
 
       if (role === "admin" && !staffVenueId) {
         setVenueSlotWindow(null);
-        setCourts(mockCourts);
-        setCells(buildMockScheduleGrid());
+        setCourts([]);
+        setCells(new Map());
         setUsingRemote(false);
         setError(
           "Your admin account has no venue assigned. Ask a superadmin to set your venue in Admins.",
@@ -246,8 +241,8 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         venueOptions.length === 0
       ) {
         setVenueSlotWindow(null);
-        setCourts(mockCourts);
-        setCells(buildMockScheduleGrid());
+        setCourts([]);
+        setCells(new Map());
         setUsingRemote(false);
         setInfo(
           "Add at least one venue under Venues to manage court schedules.",
@@ -289,8 +284,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
           setVenueSlotWindow({ startHour: startH, endHour: endH });
         }
         const remoteCourts = await fetchCourtsForSchedule(sb, filter);
-        const courtList =
-          remoteCourts.length > 0 ? remoteCourts : mockCourts;
+        const courtList = remoteCourts;
         const grid = await loadScheduleForDate(
           sb,
           slotDate,
@@ -304,16 +298,21 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         setCourts(courtList);
         setCells(grid);
         setUsingRemote(true);
+        if (courtList.length === 0) {
+          setInfo(
+            "This venue has no active courts yet. Add courts under Venues.",
+          );
+        }
       } catch (e) {
         if (cancelled) {
           return;
         }
         setVenueSlotWindow(null);
-        setCourts(mockCourts);
-        setCells(buildMockScheduleGrid());
+        setCourts([]);
+        setCells(new Map());
         setUsingRemote(false);
         setError(
-          `Could not load schedule from Supabase (${formatSupabaseError(e)}). Showing offline mock data.`,
+          `Could not load schedule from Supabase (${formatSupabaseError(e)}).`,
         );
       } finally {
         if (!cancelled) {
@@ -674,15 +673,25 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         </p>
       ) : null}
 
-      <ScheduleGrid
-        courts={courts}
-        cells={cells}
-        startHour={venueSlotWindow?.startHour ?? SCHEDULE_START_HOUR}
-        endHour={venueSlotWindow?.endHour ?? SCHEDULE_END_HOUR}
-        onSlotClick={isStaff && canEditSlots ? handleSlotClick : undefined}
-        showSlotEditors={role === "superadmin"}
-        editorLabelByUserId={slotEditorLabels}
-      />
+      {courts.length > 0 ? (
+        <ScheduleGrid
+          courts={courts}
+          cells={cells}
+          startHour={venueSlotWindow?.startHour ?? SCHEDULE_START_HOUR}
+          endHour={venueSlotWindow?.endHour ?? SCHEDULE_END_HOUR}
+          onSlotClick={isStaff && canEditSlots ? handleSlotClick : undefined}
+          showSlotEditors={role === "superadmin"}
+          editorLabelByUserId={slotEditorLabels}
+        />
+      ) : !loading ? (
+        <div
+          className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-4 py-14 text-center text-sm text-[var(--text-muted)]"
+          role="status"
+        >
+          No court grid to display. Sign in as staff, pick a venue, or fix the
+          messages above.
+        </div>
+      ) : null}
       {edit ? (
         <SlotEditModal
           key={edit.slotKey}

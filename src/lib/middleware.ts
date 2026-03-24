@@ -48,16 +48,33 @@ export async function updateSession(request: NextRequest) {
   // with the Supabase client, your users may be randomly logged out.
   await supabase.auth.getClaims();
 
-  // When you add `/auth/login`, you can redirect unauthenticated users here.
-  // const { data } = await supabase.auth.getClaims()
-  // if (!data?.claims && !request.nextUrl.pathname.startsWith("/auth")) { ... }
+  const path = request.nextUrl.pathname;
+  const isPublic =
+    path === "/login" || path.startsWith("/login/");
+
+  if (!isPublic) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      const loginUrl = new URL("/login", request.url);
+      const returnTo = `${path}${request.nextUrl.search}`;
+      loginUrl.searchParams.set("next", returnTo);
+
+      const redirectResponse = NextResponse.redirect(loginUrl);
+      for (const c of supabaseResponse.cookies.getAll()) {
+        redirectResponse.cookies.set(c.name, c.value);
+      }
+      return redirectResponse;
+    }
+  }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
   // If you're creating a new response object with NextResponse.next() make sure to:
   // 1. Pass the request in it, like so:
   //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
+  // 2. Copy over the cookies (loop; ResponseCookies has no setAll in Next 16+)
   // 3. Change the myNewResponse object to fit your needs, but avoid changing
   //    the cookies!
   // 4. Finally:

@@ -321,10 +321,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               </span>
               <div>
                 <p className="font-display text-sm font-bold leading-tight">
-                  Rovo
+                  Speedy
                 </p>
                 <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
-                  Court admin
+                  Booking management
                 </p>
               </div>
             </div>
@@ -337,7 +337,19 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 >
                   Sign in
                 </Link>
-              ) : null}
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void signOut();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] transition hover:bg-white/[0.06] hover:text-[var(--text-primary)]"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="h-3.5 w-3.5 shrink-0" strokeWidth={2.25} />
+                  Sign out
+                </button>
+              )}
             </div>
           </header>
 

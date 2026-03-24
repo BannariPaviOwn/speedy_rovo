@@ -19,9 +19,9 @@ const syne = Syne({
 });
 
 export const metadata: Metadata = {
-  title: "Rovo Court Admin — Elite Management",
+  title: "Speedy — Booking management",
   description:
-    "Badminton court operations: schedule, bookings, courts, and admin roles.",
+    "Court schedule, bookings, venues, and staff roles in one admin console.",
 };
 
 export default function RootLayout({

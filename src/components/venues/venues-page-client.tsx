@@ -208,7 +208,7 @@ export function VenuesPageClient({ rows }: { rows: VenueMasterRow[] }) {
                 id="new-name"
                 name="name"
                 required
-                placeholder="Rovo Arena"
+                placeholder="e.g. Main arena"
                 className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30"
               />
             </div>
