@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Sans, Syne, Geist } from "next/font/google";
 import "./globals.css";
+import { RoleProvider } from "@/components/providers/role-provider";
 import { cn } from "@/lib/utils";
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
@@ -31,9 +32,19 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={cn("h-full", "antialiased", dmSans.variable, syne.variable, "font-sans", geist.variable)}
+      className={cn(
+        "dark",
+        "h-full",
+        "antialiased",
+        dmSans.variable,
+        syne.variable,
+        "font-sans",
+        geist.variable,
+      )}
     >
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <RoleProvider>{children}</RoleProvider>
+      </body>
     </html>
   );
 }

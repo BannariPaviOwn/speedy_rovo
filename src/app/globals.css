@@ -11,9 +11,9 @@
   --border-subtle: rgba(255, 255, 255, 0.07);
   --text-primary: #f4f5f7;
   --text-muted: #8b919a;
-  --accent: oklch(0.97 0 0);
+  --accent: #c1ff00;
   --accent-dim: rgba(193, 255, 0, 0.14);
-  --accent-foreground: oklch(0.205 0 0);
+  --accent-foreground: #0c0e0f;
   --accent-warm: #ffb547;
   --danger: #ff6b6b;
   --slot-booked: rgba(193, 255, 0, 0.18);
@@ -149,6 +149,11 @@ body {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
+/*
+ * Dark theme tokens for shadcn. IMPORTANT: keep --accent on brand lime — the
+ * default shadcn template sets gray "accent" here, which overrides :root and
+ * makes nav pills / date chips look olive instead of #c1ff00.
+ */
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -162,8 +167,8 @@ body {
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent: #c1ff00;
+  --accent-foreground: #0c0e0f;
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -177,8 +182,8 @@ body {
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-accent: rgba(193, 255, 0, 0.14);
+  --sidebar-accent-foreground: #c1ff00;
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 }

@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
 import { DateSelector } from "@/components/schedule/date-selector";
 import { ScheduleToolbar } from "@/components/schedule/schedule-toolbar";
-import { isSameDay, startOfDay } from "@/lib/date-helpers";
+import { isBeforeToday, isSameDay, startOfDay } from "@/lib/date-helpers";
 
-export function ScheduleTop() {
-  const [selected, setSelected] = useState(() => startOfDay(new Date()));
+type ScheduleTopProps = {
+  selected: Date;
+  onSelectedChange: (d: Date) => void;
+};
+
+export function ScheduleTop({ selected, onSelectedChange }: ScheduleTopProps) {
   const today = startOfDay(new Date());
 
   const dateLine = selected.toLocaleDateString("en-US", {
@@ -17,6 +20,7 @@ export function ScheduleTop() {
   });
 
   const todayLabel = isSameDay(selected, today);
+  const pastDay = isBeforeToday(selected);
 
   return (
     <div className="space-y-5 border-b border-[var(--border-subtle)] pb-6 md:space-y-6 md:pb-8">
@@ -30,12 +34,15 @@ export function ScheduleTop() {
             {todayLabel ? (
               <span className="text-[var(--accent)]"> · Today</span>
             ) : null}
+            {pastDay ? (
+              <span className="text-sky-400/90"> · View only</span>
+            ) : null}
           </p>
         </div>
         <ScheduleToolbar />
       </div>
 
-      <DateSelector value={selected} onChange={setSelected} />
+      <DateSelector value={selected} onChange={onSelectedChange} />
     </div>
   );
 }

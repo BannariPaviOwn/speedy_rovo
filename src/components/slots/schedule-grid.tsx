@@ -33,10 +33,27 @@ const defaultLabel: Record<Exclude<SlotKind, "available">, string> = {
   membership: "MEMBERSHIP",
 };
 
-function CellCard({ cell }: { cell: ScheduleCell }) {
+function SlotEditorFooter({ label }: { label: string }) {
+  return (
+    <span
+      className="mt-1 block max-w-full truncate px-0.5 text-[9px] font-medium text-white/45 md:text-[10px]"
+      title={`Last edit: ${label}`}
+    >
+      Last edit: {label}
+    </span>
+  );
+}
+
+function CellCard({
+  cell,
+  lastEditedByLabel,
+}: {
+  cell: ScheduleCell;
+  lastEditedByLabel?: string | null;
+}) {
   if (cell.kind === "available") {
     return (
-      <div className="flex min-h-[82px] items-stretch px-1 py-1.5 md:min-h-[92px] md:p-2">
+      <div className="flex min-h-[82px] flex-col items-stretch px-1 py-1.5 md:min-h-[92px] md:p-2">
         <div
           className={[
             "flex w-full min-h-[56px] flex-col items-center justify-center gap-1 rounded-lg px-2.5 py-2.5 text-center",
@@ -50,6 +67,9 @@ function CellCard({ cell }: { cell: ScheduleCell }) {
             Open to book
           </span>
         </div>
+        {lastEditedByLabel ? (
+          <SlotEditorFooter label={lastEditedByLabel} />
+        ) : null}
       </div>
     );
   }
@@ -57,7 +77,7 @@ function CellCard({ cell }: { cell: ScheduleCell }) {
   if (cell.kind === "membership") {
     const line1 = cell.label ?? defaultLabel.membership;
     return (
-      <div className="flex min-h-[82px] items-stretch px-1 py-1.5 md:min-h-[92px] md:p-2">
+      <div className="flex min-h-[82px] flex-col items-stretch px-1 py-1.5 md:min-h-[92px] md:p-2">
         <div
           className={[
             "flex w-full flex-col justify-center gap-1.5 rounded-lg px-2.5 py-2.5 text-left",
@@ -78,6 +98,9 @@ function CellCard({ cell }: { cell: ScheduleCell }) {
             </span>
           ) : null}
         </div>
+        {lastEditedByLabel ? (
+          <SlotEditorFooter label={lastEditedByLabel} />
+        ) : null}
       </div>
     );
   }
@@ -86,7 +109,7 @@ function CellCard({ cell }: { cell: ScheduleCell }) {
   const line2 = cell.subtitle;
 
   return (
-    <div className="flex min-h-[82px] items-stretch px-1 py-1.5 md:min-h-[92px] md:p-2">
+    <div className="flex min-h-[82px] flex-col items-stretch px-1 py-1.5 md:min-h-[92px] md:p-2">
       <div
         className={[
           "flex w-full flex-col justify-center gap-1.5 rounded-lg px-2.5 py-2.5 text-left",
@@ -102,6 +125,9 @@ function CellCard({ cell }: { cell: ScheduleCell }) {
           </span>
         ) : null}
       </div>
+      {lastEditedByLabel ? (
+        <SlotEditorFooter label={lastEditedByLabel} />
+      ) : null}
     </div>
   );
 }
@@ -139,6 +165,10 @@ export function ScheduleGrid({
   courts,
   cells,
   onSlotClick,
+  startHour = SCHEDULE_START_HOUR,
+  endHour = SCHEDULE_END_HOUR,
+  showSlotEditors,
+  editorLabelByUserId,
 }: {
   courts: CourtInfo[];
   cells: Map<string, ScheduleCell>;
@@ -148,12 +178,16 @@ export function ScheduleGrid({
     courtName: string;
     timeLabel: string;
   }) => void;
+  /** First slot hour (0–23), inclusive. */
+  startHour?: number;
+  /** Exclusive end hour (1–24). */
+  endHour?: number;
+  /** When true (e.g. superadmin), show who last updated each slot when known. */
+  showSlotEditors?: boolean;
+  /** Map from `updated_by` user id → display username. */
+  editorLabelByUserId?: Map<string, string>;
 }) {
-  const times = generateSlotTimes(
-    SCHEDULE_START_HOUR,
-    SCHEDULE_END_HOUR,
-    SLOT_STEP_MINUTES,
-  );
+  const times = generateSlotTimes(startHour, endHour, SLOT_STEP_MINUTES);
 
   const defaultCell: ScheduleCell = {
     kind: "blocked",
@@ -208,7 +242,13 @@ export function ScheduleGrid({
                 {courts.map((court) => {
                   const key = `${court.id}::${t.key}`;
                   const cell = cells.get(key) ?? defaultCell;
-                  const inner = <CellCard cell={cell} />;
+                  const lastEditedByLabel =
+                    showSlotEditors && cell.updatedByUserId
+                      ? editorLabelByUserId?.get(cell.updatedByUserId) ?? null
+                      : null;
+                  const inner = (
+                    <CellCard cell={cell} lastEditedByLabel={lastEditedByLabel} />
+                  );
                   return (
                     <td
                       key={court.id}

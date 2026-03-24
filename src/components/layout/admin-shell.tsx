@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo } from "react";
 import {
   BarChart3,
   CalendarClock,
   HelpCircle,
   LayoutDashboard,
+  LogIn,
   LogOut,
   MapPin,
   Plus,
@@ -20,6 +22,13 @@ import {
 } from "lucide-react";
 import { useRole } from "@/components/providers/role-provider";
 import type { AdminRole } from "@/lib/types";
+import { authEmailToUsername } from "@/lib/username-auth";
+
+type ShellNavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
 
 type NavItem = {
   href: string;
@@ -43,7 +52,7 @@ const navItems: NavItem[] = [
   },
   {
     href: "/venues",
-    label: "Courts",
+    label: "Venues",
     icon: MapPin,
     roles: ["superadmin"],
   },
@@ -51,7 +60,7 @@ const navItems: NavItem[] = [
     href: "/bookings",
     label: "Bookings",
     icon: Users,
-    roles: ["admin"],
+    roles: ["superadmin", "admin"],
   },
   {
     href: "/admins",
@@ -118,8 +127,10 @@ function NavLink({
 }
 
 function DesktopTopBar() {
-  const { role, setRole } = useRole();
-  const roleLabel = role === "superadmin" ? "SUPERADMIN" : "ADMIN";
+  const { session, user, role, loading, signOut } = useRole();
+  const isStaff = role === "admin" || role === "superadmin";
+  const roleLabel =
+    role === "superadmin" ? "SUPERADMIN" : role === "admin" ? "ADMIN" : null;
 
   return (
     <header className="hidden border-b border-[var(--border-subtle)] bg-[var(--bg-base)]/90 px-6 py-4 backdrop-blur-md md:block">
@@ -133,33 +144,16 @@ function DesktopTopBar() {
             aria-label="Search bookings"
           />
         </div>
-        <div className="flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5">
-          <button
-            type="button"
-            onClick={() => setRole("admin")}
-            className={[
-              "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-              role === "admin"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)] shadow-sm"
-                : "text-[var(--text-muted)] hover:text-[var(--text-primary)]",
-            ].join(" ")}
-          >
-            Admin
-          </button>
-          <button
-            type="button"
-            onClick={() => setRole("superadmin")}
-            className={[
-              "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-              role === "superadmin"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)] shadow-sm"
-                : "text-[var(--text-muted)] hover:text-[var(--text-primary)]",
-            ].join(" ")}
-          >
-            Superadmin
-          </button>
-        </div>
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          {!session && !loading ? (
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 text-xs font-bold uppercase tracking-wide text-[var(--accent)] transition hover:bg-white/[0.04]"
+            >
+              <LogIn className="h-4 w-4" strokeWidth={2} />
+              Sign in
+            </Link>
+          ) : null}
           <button
             type="button"
             className="rounded-xl p-2.5 text-[var(--text-muted)] transition-colors hover:bg-white/[0.04] hover:text-[var(--text-primary)]"
@@ -181,12 +175,31 @@ function DesktopTopBar() {
             />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-[var(--text-primary)]">
-                Marcus Draken
+                {user?.email
+                  ? (authEmailToUsername(user.email) ?? user.email)
+                  : "Guest"}
               </p>
               <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent)]">
-                {roleLabel}
+                {loading
+                  ? "…"
+                  : !session
+                    ? "NOT SIGNED IN"
+                    : isStaff && roleLabel
+                      ? roleLabel
+                      : "NO STAFF ACCESS"}
               </p>
             </div>
+            {session ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void signOut();
+                }}
+                className="rounded-lg px-2 py-1 text-xs font-semibold text-[var(--text-muted)] hover:bg-white/[0.06] hover:text-[var(--text-primary)]"
+              >
+                Sign out
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -196,9 +209,31 @@ function DesktopTopBar() {
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { role, setRole } = useRole();
+  const { role, session, signOut } = useRole();
+  const isStaff = role === "admin" || role === "superadmin";
 
-  const visible = navItems.filter((item) => item.roles.includes(role));
+  const visible: ShellNavItem[] = useMemo(() => {
+    if (!session) {
+      return [
+        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/slots", label: "Schedule", icon: CalendarClock },
+        { href: "/login", label: "Sign in", icon: LogIn },
+      ];
+    }
+    if (!isStaff) {
+      return [
+        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/slots", label: "Schedule", icon: CalendarClock },
+      ];
+    }
+    return navItems
+      .filter((item) => item.roles.includes(role!))
+      .map((item) => ({
+        href: item.href,
+        label: item.label,
+        icon: item.icon,
+      }));
+  }, [session, isStaff, role]);
 
   return (
     <div className="mesh-bg relative min-h-dvh">
@@ -216,10 +251,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </span>
             <div className="min-w-0 pt-0.5">
               <p className="font-display text-base font-bold leading-tight tracking-tight text-[var(--text-primary)]">
-                Rovo Court Admin
+                Speedy
               </p>
               <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                Elite management
+                Booking management
               </p>
             </div>
           </div>
@@ -263,13 +298,16 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 <HelpCircle className="h-4 w-4" />
                 Support
               </Link>
-              <Link
-                href="#"
+              <button
+                type="button"
+                onClick={() => {
+                  void signOut();
+                }}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               >
                 <LogOut className="h-4 w-4" />
                 Logout
-              </Link>
+              </button>
             </div>
           </div>
         </aside>
@@ -292,32 +330,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="flex shrink-0 items-center gap-1.5">
-              <div className="flex rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setRole("admin")}
-                  className={[
-                    "rounded-full px-2 py-1.5 text-[10px] font-semibold transition-colors",
-                    role === "admin"
-                      ? "bg-[var(--accent)] text-[var(--accent-foreground)] shadow-sm"
-                      : "text-[var(--text-muted)]",
-                  ].join(" ")}
+              {!session ? (
+                <Link
+                  href="/login"
+                  className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--accent)]"
                 >
-                  Admin
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRole("superadmin")}
-                  className={[
-                    "rounded-full px-2 py-1.5 text-[10px] font-semibold transition-colors",
-                    role === "superadmin"
-                      ? "bg-[var(--accent)] text-[var(--accent-foreground)] shadow-sm"
-                      : "text-[var(--text-muted)]",
-                  ].join(" ")}
-                >
-                  Super
-                </button>
-              </div>
+                  Sign in
+                </Link>
+              ) : null}
             </div>
           </header>
 

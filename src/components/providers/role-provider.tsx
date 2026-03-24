@@ -4,29 +4,103 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
+import type { Session, User } from "@supabase/supabase-js";
+import { signOutAction } from "@/app/auth/actions";
+import { createClient } from "@/lib/client";
+import { fetchStaffContext } from "@/lib/db/staff-queries";
 import type { AdminRole } from "@/lib/types";
 
 type RoleContextValue = {
-  role: AdminRole;
-  setRole: (role: AdminRole) => void;
-  toggleRole: () => void;
+  session: Session | null;
+  user: User | null;
+  /** From `staff_roles`; null if not signed in or no row */
+  role: AdminRole | null;
+  /** `staff_roles.venue_id` — set for admins; null for superadmins */
+  venueId: string | null;
+  loading: boolean;
+  signOut: () => Promise<void>;
 };
 
 const RoleContext = createContext<RoleContextValue | null>(null);
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRole] = useState<AdminRole>("admin");
+  const supabase = useMemo(() => createClient(), []);
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [role, setRole] = useState<AdminRole | null>(null);
+  const [venueId, setVenueId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const toggleRole = useCallback(() => {
-    setRole((r) => (r === "superadmin" ? "admin" : "superadmin"));
+  const applyUser = useCallback(
+    async (u: User | null) => {
+      if (!u) {
+        setRole(null);
+        setVenueId(null);
+        return;
+      }
+      try {
+        const ctx = await fetchStaffContext(supabase, u.id);
+        setRole(ctx?.role ?? null);
+        setVenueId(ctx?.venueId ?? null);
+      } catch {
+        setRole(null);
+        setVenueId(null);
+      }
+    },
+    [supabase],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const {
+        data: { session: s },
+      } = await supabase.auth.getSession();
+      if (cancelled) {
+        return;
+      }
+      setSession(s);
+      setUser(s?.user ?? null);
+      await applyUser(s?.user ?? null);
+      if (!cancelled) {
+        setLoading(false);
+      }
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (_event, s) => {
+        setSession(s);
+        setUser(s?.user ?? null);
+        await applyUser(s?.user ?? null);
+        setLoading(false);
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase, applyUser]);
+
+  const signOut = useCallback(async () => {
+    await signOutAction();
   }, []);
 
   const value = useMemo(
-    () => ({ role, setRole, toggleRole }),
-    [role, toggleRole],
+    () => ({
+      session,
+      user,
+      role,
+      venueId,
+      loading,
+      signOut,
+    }),
+    [session, user, role, venueId, loading, signOut],
   );
 
   return (

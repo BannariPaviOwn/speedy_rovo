@@ -8,20 +8,24 @@ import { cellFromForm, formDefaultsFromCell } from "@/lib/schedule-cell";
 export function SlotEditModal({
   courtName,
   timeLabel,
+  scheduleDate,
   initialCell,
   onSave,
   onClose,
 }: {
   courtName: string;
   timeLabel: string;
+  /** Current grid date `YYYY-MM-DD` (minimum for “apply through”). */
+  scheduleDate: string;
   initialCell: ScheduleCell;
-  onSave: (cell: ScheduleCell) => void;
+  onSave: (payload: { cell: ScheduleCell; tillDate: string }) => void;
   onClose: () => void;
 }) {
   const [kind, setKind] = useState<SlotKind>(initialCell.kind);
   const [subtitle, setSubtitle] = useState("");
   const [membershipDetail, setMembershipDetail] = useState("");
   const [notes, setNotes] = useState("");
+  const [tillDate, setTillDate] = useState(scheduleDate);
 
   useEffect(() => {
     const f = formDefaultsFromCell(initialCell);
@@ -29,7 +33,9 @@ export function SlotEditModal({
     setSubtitle(f.subtitle);
     setMembershipDetail(f.membershipDetail);
     setNotes(f.notes);
-  }, [initialCell]);
+    const end = initialCell.tillDate ?? scheduleDate;
+    setTillDate(end < scheduleDate ? scheduleDate : end);
+  }, [initialCell, scheduleDate]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -40,13 +46,17 @@ export function SlotEditModal({
   }, [onClose]);
 
   const handleSave = () => {
-    onSave(
-      cellFromForm(kind, {
-        subtitle,
-        membershipDetail,
-        notes,
-      }),
-    );
+    const cell = cellFromForm(kind, {
+      subtitle,
+      membershipDetail,
+      notes,
+    });
+    const end =
+      tillDate && tillDate >= scheduleDate ? tillDate : scheduleDate;
+    onSave({
+      cell: { ...cell, tillDate: end },
+      tillDate: end,
+    });
   };
 
   const showDetailLine =
@@ -158,6 +168,27 @@ export function SlotEditModal({
               />
             </div>
           ) : null}
+
+          <div>
+            <label
+              htmlFor="slot-till-date"
+              className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]"
+            >
+              Apply through (inclusive)
+            </label>
+            <input
+              id="slot-till-date"
+              type="date"
+              min={scheduleDate}
+              value={tillDate}
+              onChange={(e) => setTillDate(e.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/30"
+            />
+            <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">
+              Same court and time on each day from {scheduleDate} through this
+              date.
+            </p>
+          </div>
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-[var(--border-subtle)] pt-5">

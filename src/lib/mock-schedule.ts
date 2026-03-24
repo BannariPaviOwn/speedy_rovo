@@ -27,6 +27,10 @@ export type ScheduleCell = {
   membershipDetail?: string;
   /** Short admin note (membership slots). */
   notes?: string;
+  /** Inclusive end date (YYYY-MM-DD) when saved through the slot editor range. */
+  tillDate?: string;
+  /** Auth user who last saved this slot (`court_slot_entries.updated_by`). */
+  updatedByUserId?: string;
 };
 
 const allBlocked: ScheduleCell = {
