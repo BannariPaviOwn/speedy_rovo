@@ -1,84 +1,181 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { LOGIN_SESSION_EXPIRED_PARAM } from "@/lib/auth/constants";
+import {
+  getAuthCookieOptions,
+  getSupabasePublishableKey,
+  getSupabaseUrl,
+  hasSupabaseAuthCookies,
+  MIDDLEWARE_AUTH_HEADER,
+  MIDDLEWARE_USER_EMAIL_HEADER,
+  MIDDLEWARE_USER_ID_HEADER,
+  serverAuthClientOptions,
+} from "@/lib/auth/supabase-env";
+import {
+  isAuthRateLimitError,
+  isTransientAuthError,
+  shouldClearSessionOnAuthError,
+} from "@/lib/auth/session-errors";
 
-function publishableKey() {
-  return (
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
+/** Preserve refreshed session cookies when issuing redirects or new responses. */
+function withSupabaseCookies(
+  target: NextResponse,
+  supabaseResponse: NextResponse,
+) {
+  for (const { name, value, ...options } of supabaseResponse.cookies.getAll()) {
+    target.cookies.set(name, value, options);
+  }
+  return target;
+}
+
+function loginRedirect(
+  request: NextRequest,
+  supabaseResponse: NextResponse,
+  options?: { sessionExpired?: boolean; returnTo?: string },
+) {
+  const loginUrl = new URL("/login", request.url);
+  if (options?.returnTo) {
+    loginUrl.searchParams.set("next", options.returnTo);
+  }
+  if (options?.sessionExpired) {
+    loginUrl.searchParams.set("error", LOGIN_SESSION_EXPIRED_PARAM);
+  }
+  return withSupabaseCookies(
+    NextResponse.redirect(loginUrl),
+    supabaseResponse,
   );
 }
 
+function nextForRequest(
+  request: NextRequest,
+  supabaseResponse: NextResponse,
+  user?: { id: string; email?: string | null },
+) {
+  const requestHeaders = new Headers(request.headers);
+  if (user) {
+    requestHeaders.set(MIDDLEWARE_AUTH_HEADER, "1");
+    requestHeaders.set(MIDDLEWARE_USER_ID_HEADER, user.id);
+    if (user.email) {
+      requestHeaders.set(MIDDLEWARE_USER_EMAIL_HEADER, user.email);
+    }
+  }
+  const response = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+  return withSupabaseCookies(response, supabaseResponse);
+}
+
+/**
+ * Single server-side refresh point per document navigation.
+ * Downstream Server Components should use getSession() only (see getStaffAuthContext).
+ */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
 
   const path = request.nextUrl.pathname;
-  const isPublic =
-    path === "/login" || path.startsWith("/login/");
+  const isLogin = path === "/login" || path.startsWith("/login/");
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = publishableKey();
+  if (path === "/" && request.method === "GET") {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // No Supabase round-trip on the sign-in page (avoids slow auth on /login).
+  if (isLogin) {
+    return supabaseResponse;
+  }
+
+  const url = getSupabaseUrl();
+  const key = getSupabasePublishableKey();
   if (!url || !key) {
-    return supabaseResponse;
-  }
-
-  // Avoid Supabase round-trips on the sign-in page (reduces Edge / proxy timeouts
-  // when the auth API is slow or far from the deployment region).
-  if (isPublic) {
-    return supabaseResponse;
-  }
-
-  // With Fluid compute, don't put this client in a global environment
-  // variable. Always create a new one on each request.
-  const supabase = createServerClient(url, key,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-
-  // Single auth check per request (getClaims + getUser doubled latency and timed
-  // out upstream proxies on slow Supabase responses).
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    const loginUrl = new URL("/login", request.url);
     const returnTo = `${path}${request.nextUrl.search}`;
-    loginUrl.searchParams.set("next", returnTo);
-
-    const redirectResponse = NextResponse.redirect(loginUrl);
-    for (const c of supabaseResponse.cookies.getAll()) {
-      redirectResponse.cookies.set(c.name, c.value);
-    }
-    return redirectResponse;
+    return loginRedirect(request, supabaseResponse, { returnTo });
   }
 
-  // IMPORTANT: You *must* return the supabaseResponse object as it is.
-  // If you're creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies (loop; ResponseCookies has no setAll in Next 16+)
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
+  const supabase = createServerClient(url, key, {
+    cookieOptions: getAuthCookieOptions(),
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) =>
+          request.cookies.set(name, value),
+        );
+        supabaseResponse = NextResponse.next({
+          request,
+        });
+        cookiesToSet.forEach(({ name, value, options }) =>
+          supabaseResponse.cookies.set(name, value, options),
+        );
+      },
+    },
+    ...serverAuthClientOptions,
+  });
 
-  return supabaseResponse
+  await supabase.auth.stopAutoRefresh();
+
+  let user = null;
+  let authFailed = false;
+  let authTransient = false;
+
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      const message = error.message;
+      if (isAuthRateLimitError(message)) {
+        authTransient = true;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        user = session?.user ?? null;
+      } else if (isTransientAuthError(message)) {
+        authTransient = true;
+      } else if (
+        hasSupabaseAuthCookies(request.cookies.getAll()) &&
+        shouldClearSessionOnAuthError(message)
+      ) {
+        authFailed = true;
+        await supabase.auth.signOut();
+      }
+    } else {
+      user = data.user;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isAuthRateLimitError(message)) {
+      authTransient = true;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      user = session?.user ?? null;
+    } else if (isTransientAuthError(message)) {
+      authTransient = true;
+    } else if (
+      hasSupabaseAuthCookies(request.cookies.getAll()) &&
+      shouldClearSessionOnAuthError(message)
+    ) {
+      authFailed = true;
+      await supabase.auth.signOut();
+    }
+  }
+
+  if (!isLogin && !user) {
+    const hasAuthCookies = hasSupabaseAuthCookies(request.cookies.getAll());
+    if (authTransient && hasAuthCookies) {
+      return nextForRequest(request, supabaseResponse);
+    }
+    const returnTo = `${path}${request.nextUrl.search}`;
+    return loginRedirect(request, supabaseResponse, {
+      returnTo,
+      sessionExpired: authFailed,
+    });
+  }
+
+  return nextForRequest(
+    request,
+    supabaseResponse,
+    user ? { id: user.id, email: user.email } : undefined,
+  );
 }

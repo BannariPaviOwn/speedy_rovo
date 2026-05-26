@@ -1,10 +1,35 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
-import { ScheduleStatCards } from "@/components/schedule/schedule-stat-cards";
 import { ScheduleTop } from "@/components/schedule/schedule-top";
-import { ScheduleInteractive } from "@/components/slots/schedule-interactive";
+import {
+  ScheduleInteractiveSkeleton,
+  StatCardsSkeleton,
+} from "@/components/slots/slots-loading-ui";
 import { startOfDay } from "@/lib/date-helpers";
+
+const ScheduleInteractive = dynamic(
+  () =>
+    import("@/components/slots/schedule-interactive").then((m) => ({
+      default: m.ScheduleInteractive,
+    })),
+  {
+    ssr: false,
+    loading: () => <ScheduleInteractiveSkeleton />,
+  },
+);
+
+const ScheduleStatCards = dynamic(
+  () =>
+    import("@/components/schedule/schedule-stat-cards").then((m) => ({
+      default: m.ScheduleStatCards,
+    })),
+  {
+    ssr: false,
+    loading: () => <StatCardsSkeleton />,
+  },
+);
 
 export function SlotsPageClient() {
   const [selected, setSelected] = useState(() => startOfDay(new Date()));

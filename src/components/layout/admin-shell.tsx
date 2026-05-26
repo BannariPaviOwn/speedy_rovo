@@ -39,7 +39,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   {
-    href: "/",
+    href: "/dashboard",
     label: "Dashboard",
     icon: LayoutDashboard,
     roles: ["superadmin", "admin"],
@@ -128,6 +128,7 @@ function NavLink({
 
 function DesktopTopBar() {
   const { session, user, role, loading, signOut } = useRole();
+  const signedIn = Boolean(session ?? user);
   const isStaff = role === "admin" || role === "superadmin";
   const roleLabel =
     role === "superadmin" ? "SUPERADMIN" : role === "admin" ? "ADMIN" : null;
@@ -145,7 +146,7 @@ function DesktopTopBar() {
           />
         </div>
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
-          {!session && !loading ? (
+          {!signedIn && !loading ? (
             <Link
               href="/login"
               className="inline-flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 text-xs font-bold uppercase tracking-wide text-[var(--accent)] transition hover:bg-white/[0.04]"
@@ -182,14 +183,14 @@ function DesktopTopBar() {
               <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent)]">
                 {loading
                   ? "…"
-                  : !session
+                  : !signedIn
                     ? "NOT SIGNED IN"
                     : isStaff && roleLabel
                       ? roleLabel
                       : "NO STAFF ACCESS"}
               </p>
             </div>
-            {session ? (
+            {signedIn ? (
               <button
                 type="button"
                 onClick={() => {
@@ -209,20 +210,21 @@ function DesktopTopBar() {
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { role, session, signOut } = useRole();
+  const { role, session, user, signOut, authNotice } = useRole();
+  const signedIn = Boolean(session ?? user);
   const isStaff = role === "admin" || role === "superadmin";
 
   const visible: ShellNavItem[] = useMemo(() => {
-    if (!session) {
+    if (!signedIn) {
       return [
-        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/slots", label: "Schedule", icon: CalendarClock },
         { href: "/login", label: "Sign in", icon: LogIn },
       ];
     }
     if (!isStaff) {
       return [
-        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/slots", label: "Schedule", icon: CalendarClock },
       ];
     }
@@ -233,7 +235,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         label: item.label,
         icon: item.icon,
       }));
-  }, [session, isStaff, role]);
+  }, [signedIn, isStaff, role]);
 
   return (
     <div className="mesh-bg relative min-h-dvh">
@@ -267,8 +269,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 label={item.label}
                 icon={item.icon}
                 active={
-                  item.href === "/"
-                    ? pathname === "/"
+                  item.href === "/dashboard"
+                    ? pathname === "/dashboard"
                     : pathname.startsWith(item.href)
                 }
               />
@@ -330,7 +332,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="flex shrink-0 items-center gap-1.5">
-              {!session ? (
+              {!signedIn ? (
                 <Link
                   href="/login"
                   className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--accent)]"
@@ -356,6 +358,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <DesktopTopBar />
 
           <main className="flex-1 px-2 py-4 pb-6 md:px-8 md:py-8 md:pb-8">
+            {authNotice ? (
+              <p
+                className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100/90"
+                role="status"
+              >
+                {authNotice}
+              </p>
+            ) : null}
             {children}
           </main>
         </div>
@@ -369,8 +379,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               icon={item.icon}
               mobile
               active={
-                item.href === "/"
-                  ? pathname === "/"
+                item.href === "/dashboard"
+                  ? pathname === "/dashboard"
                   : pathname.startsWith(item.href)
               }
             />

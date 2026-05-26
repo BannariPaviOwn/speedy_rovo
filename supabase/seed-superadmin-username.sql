@@ -1,13 +1,33 @@
--- First-time setup only (before you can use the in-app “Create admin” form).
+-- First-time setup: grant superadmin by username (before in-app “Create admin” works).
 --
--- Supabase Dashboard → Authentication → “Add user” asks for an “Email” field.
--- This app does not use real email — put your USERNAME in this form only by using
--- the pattern:  yourusername@{NEXT_PUBLIC_USERNAME_EMAIL_DOMAIN or speedy.user}
--- Example username `bans` → paste:  bans@speedy.user
--- That value is not an inbox; it is only how Supabase stores a username internally.
+-- Auth user must exist with email = `{username}@{domain}` (not a real inbox).
+-- Default domain: speedy.user  →  username `bans`  →  bans@speedy.user
 --
--- Then grant superadmin (replace UUID with the new user’s id from Authentication → Users):
+-- Supabase Dashboard → Authentication → Add user:
+--   Email field: bans@speedy.user
+--   Password: (your choice)
+--
+-- Then run this file in SQL Editor (replace username / email if needed):
 
-insert into public.staff_roles (user_id, role)
-values ('00000000-0000-0000-0000-000000000000', 'superadmin')
-on conflict (user_id) do update set role = excluded.role;
+insert into public.staff_roles (user_id, login_username, role, venue_id, status, is_active)
+select
+  u.id,
+  lower(split_part(u.email, '@', 1)),
+  'superadmin'::public.admin_role,
+  null,
+  'active',
+  true
+from auth.users u
+where lower(u.email) = lower('bans@speedy.user')
+on conflict (user_id) do update set
+  login_username = coalesce(
+    public.staff_roles.login_username,
+    excluded.login_username
+  ),
+  role = excluded.role,
+  venue_id = null,
+  status = 'active',
+  is_active = true;
+
+-- No row inserted? The auth user email does not match — check:
+--   select id, email from auth.users order by created_at desc limit 20;

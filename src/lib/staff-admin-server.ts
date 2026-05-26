@@ -1,7 +1,10 @@
 import { usernamesForUserIds } from "@/lib/audit-usernames";
 import { createClient } from "@/lib/server";
 import { createSupabaseAdmin } from "@/lib/supabase-admin";
-import { authEmailToUsername, usernameToAuthEmail } from "@/lib/username-auth";
+import { assertSupabaseServiceRole } from "@/lib/supabase-service-role-setup";
+import { parseUsername, usernameToAuthEmail } from "@/lib/username-auth";
+
+export { hasSupabaseServiceRole } from "@/lib/supabase-admin";
 
 /** Require at least 10 digits; keep user formatting (spaces, +). */
 export function validateContactPhone(raw: string): string {
@@ -86,24 +89,25 @@ export type StaffDirectoryRow = {
 
 export async function listStaffDirectory(): Promise<StaffDirectoryRow[]> {
   await assertSuperadmin();
-  const admin = createSupabaseAdmin();
-  const { data: roles, error } = await admin
+  const supabase = await createClient();
+  const { data: roles, error } = await supabase
     .from("staff_roles")
     .select(
-      "user_id, role, venue_id, created_at, status, is_active, created_by, updated_by, contact_phone",
+      "user_id, login_username, role, venue_id, created_at, status, is_active, created_by, updated_by, contact_phone",
     )
     .order("created_at", { ascending: true });
   if (error) {
     throw new Error(error.message);
   }
 
-  const { data: venueRows } = await admin.from("venues").select("id, name");
+  const { data: venueRows } = await supabase.from("venues").select("id, name");
   const venueNameById = new Map(
     (venueRows ?? []).map((v) => [v.id as string, v.name as string]),
   );
 
   const rels = (roles ?? []) as {
     user_id: string;
+    login_username: string | null;
     role: string;
     venue_id: string | null;
     created_at: string;
@@ -115,37 +119,26 @@ export async function listStaffDirectory(): Promise<StaffDirectoryRow[]> {
   }[];
 
   const labelMap = await usernamesForUserIds(
-    rels.flatMap((rel) => [rel.created_by, rel.updated_by]),
+    rels.flatMap((rel) => [rel.user_id, rel.created_by, rel.updated_by]),
   );
 
   const rows: StaffDirectoryRow[] = [];
+
   for (const rel of rels) {
     const venueName = rel.venue_id
       ? (venueNameById.get(rel.venue_id) ?? null)
       : null;
-    const { data: authData, error: authErr } =
-      await admin.auth.admin.getUserById(rel.user_id);
     const cb = rel.created_by ? (labelMap.get(rel.created_by) ?? null) : null;
     const ub = rel.updated_by ? (labelMap.get(rel.updated_by) ?? null) : null;
-    if (authErr) {
-      rows.push({
-        userId: rel.user_id,
-        username: null,
-        role: rel.role,
-        venueId: rel.venue_id,
-        venueName,
-        createdAt: rel.created_at,
-        rowStatus: rel.status,
-        isActive: rel.is_active,
-        createdByUsername: cb,
-        updatedByUsername: ub,
-        contactPhone: rel.contact_phone ?? null,
-      });
-      continue;
-    }
+
+    const username =
+      rel.login_username?.trim() ||
+      labelMap.get(rel.user_id) ||
+      null;
+
     rows.push({
       userId: rel.user_id,
-      username: authEmailToUsername(authData.user?.email ?? null),
+      username,
       role: rel.role,
       venueId: rel.venue_id,
       venueName,
@@ -169,6 +162,7 @@ export async function createAdminUser(params: {
   contactPhone: string;
 }): Promise<{ userId: string }> {
   const actor = await assertSuperadmin();
+  assertSupabaseServiceRole();
   const admin = createSupabaseAdmin();
   if (!params.username?.trim() || !params.password) {
     throw new Error("Username and password are required.");
@@ -201,8 +195,10 @@ export async function createAdminUser(params: {
     throw new Error("Select a venue for this admin.");
   }
 
+  const loginUsername = parseUsername(params.username);
   const { error: roleErr } = await admin.from("staff_roles").insert({
     user_id: created.user.id,
+    login_username: loginUsername,
     role: "admin",
     venue_id: venueId,
     contact_phone: contactPhone,
@@ -219,7 +215,7 @@ export async function createAdminUser(params: {
   return { userId: created.user.id };
 }
 
-/** Reassign which venue an admin manages (superadmin only, service role). */
+/** Reassign which venue an admin manages (superadmin only, session client). */
 export async function updateAdminVenueScope(params: {
   userId: string;
   venueId: string;
@@ -228,8 +224,8 @@ export async function updateAdminVenueScope(params: {
   if (actor.id === params.userId) {
     throw new Error("Use another superadmin to change your own venue scope.");
   }
-  const admin = createSupabaseAdmin();
-  const { data: target, error: fetchErr } = await admin
+  const supabase = await createClient();
+  const { data: target, error: fetchErr } = await supabase
     .from("staff_roles")
     .select("user_id, role")
     .eq("user_id", params.userId)
@@ -247,7 +243,7 @@ export async function updateAdminVenueScope(params: {
   if (!venueId) {
     throw new Error("Select a venue.");
   }
-  const { data: venue, error: vErr } = await admin
+  const { data: venue, error: vErr } = await supabase
     .from("venues")
     .select("id")
     .eq("id", venueId)
@@ -257,7 +253,7 @@ export async function updateAdminVenueScope(params: {
   if (vErr || !venue) {
     throw new Error("That venue is not available. Pick an active venue.");
   }
-  const { error } = await admin
+  const { error } = await supabase
     .from("staff_roles")
     .update({ venue_id: venueId, updated_by: actor.id })
     .eq("user_id", params.userId);
@@ -306,8 +302,9 @@ export async function deleteStaffMember(userId: string): Promise<void> {
   if (actor.id === userId) {
     throw new Error("You cannot delete your own account from this screen.");
   }
-  const admin = createSupabaseAdmin();
-  const { data: roles, error: listErr } = await admin
+  assertSupabaseServiceRole();
+  const supabase = await createClient();
+  const { data: roles, error: listErr } = await supabase
     .from("staff_roles")
     .select("user_id, role");
   if (listErr) {
@@ -324,6 +321,7 @@ export async function deleteStaffMember(userId: string): Promise<void> {
   if (role === "superadmin" && superCount <= 1) {
     throw new Error("Cannot delete the only superadmin.");
   }
+  const admin = createSupabaseAdmin();
   const { error: delRoleErr } = await admin
     .from("staff_roles")
     .delete()

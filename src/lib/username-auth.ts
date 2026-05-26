@@ -5,8 +5,8 @@
  * from the username: `{username}@{NEXT_PUBLIC_USERNAME_EMAIL_DOMAIN}`. That string is
  * not a mailbox; it's an internal handle. End users never type or see `@…` in the app.
  *
- * Sign-in runs in the browser (`app/login/page.tsx`) so Supabase session cookies
- * update reliably when switching accounts; the mapped id is used when calling Auth.
+ * Sign-in runs in a server action (`app/auth/actions.ts`) so `sb-*-auth-token`
+ * cookies are written via Next.js `cookies()`; middleware refreshes them per request.
  */
 
 export function usernameEmailDomain(): string {
@@ -50,8 +50,16 @@ export function authEmailToUsername(
 /**
  * Supabase error strings often say "email"; we show username-only sign-in in the UI.
  */
+import {
+  AUTH_RATE_LIMIT_USER_MESSAGE,
+  isAuthRateLimitError,
+} from "@/lib/auth/session-errors";
+
 export function mapAuthSignInErrorForUsernameUi(message: string): string {
   const m = message.trim();
+  if (isAuthRateLimitError(m)) {
+    return AUTH_RATE_LIMIT_USER_MESSAGE;
+  }
   if (/invalid login credentials/i.test(m)) {
     return "Invalid username or password.";
   }

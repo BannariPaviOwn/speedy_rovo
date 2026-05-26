@@ -7,6 +7,17 @@ import {
   updateAdminContactPhone,
   updateAdminVenueScope,
 } from "@/lib/staff-admin-server";
+import {
+  isServiceRoleSetupError,
+  serviceRoleActionBlockedHint,
+} from "@/lib/supabase-service-role-setup";
+
+function staffActionErrorMessage(e: unknown, fallback: string): string {
+  if (e instanceof Error && isServiceRoleSetupError(e.message)) {
+    return serviceRoleActionBlockedHint();
+  }
+  return e instanceof Error ? e.message : fallback;
+}
 
 export type CreateAdminState = {
   ok: boolean;
@@ -53,7 +64,7 @@ export async function adminStaffMutationAction(
           : "Could not update venue scope.";
     return {
       ok: false,
-      error: e instanceof Error ? e.message : fallback,
+      error: staffActionErrorMessage(e, fallback),
     };
   }
 }
@@ -71,7 +82,9 @@ export async function createAdminAction(
     revalidatePath("/admins");
     return { ok: true, error: null };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Something went wrong.";
-    return { ok: false, error: message };
+    return {
+      ok: false,
+      error: staffActionErrorMessage(e, "Something went wrong."),
+    };
   }
 }

@@ -1,13 +1,10 @@
 "use client";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  resolveSlotEditorUsernames,
-  resolveVenueAdminUsernames,
-} from "@/app/(app)/slots/actions";
+import { resolveVenueAdminUsernames } from "@/app/(app)/slots/actions";
 import { ScheduleGrid } from "@/components/slots/schedule-grid";
-import { SlotEditModal } from "@/components/slots/slot-edit-modal";
 import { ScheduleVenueHeader } from "@/components/slots/schedule-venue-header";
 import { useRole } from "@/components/providers/role-provider";
 import { createClient } from "@/lib/client";
@@ -41,6 +38,14 @@ import {
 } from "@/lib/schedule-config";
 import type { CourtInfo, ScheduleCell } from "@/lib/mock-schedule";
 
+const SlotEditModal = dynamic(
+  () =>
+    import("@/components/slots/slot-edit-modal").then((m) => ({
+      default: m.SlotEditModal,
+    })),
+  { ssr: false },
+);
+
 type ScheduleInteractiveProps = {
   selectedDate: Date;
 };
@@ -60,6 +65,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     venueId: staffVenueId,
     loading: authLoading,
   } = useRole();
+  const signedIn = Boolean(session ?? user);
   const isStaff = role === "admin" || role === "superadmin";
 
   const [courts, setCourts] = useState<CourtInfo[]>([]);
@@ -142,7 +148,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     if (!supabase) {
       return;
     }
-    if (authLoading || !session) {
+    if (authLoading || !signedIn) {
       setScheduleVenues((prev) =>
         prev.status === "inactive" ? prev : { status: "inactive" },
       );
@@ -187,7 +193,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     return () => {
       cancelled = true;
     };
-  }, [authLoading, session, role, staffVenueId, supabase]);
+  }, [authLoading, signedIn, role, staffVenueId, supabase]);
 
   /** Admin: show venue name next to schedule */
   useEffect(() => {
@@ -271,13 +277,13 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
       setError(null);
       setInfo(null);
 
-      if (!session || !isStaff) {
+      if (!signedIn || !isStaff) {
         setVenueSlotWindow(null);
         setCourts([]);
         setCells(new Map());
         setUsingRemote(false);
         setInfo(
-          !session
+          !signedIn
             ? "Sign in with your staff username (admin or superadmin) to load and edit the live schedule."
             : "This account is not in staff_roles. Contact a superadmin for access.",
         );
@@ -431,7 +437,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   }, [
     supabase,
     slotDate,
-    session,
+    signedIn,
     isStaff,
     authLoading,
     role,
@@ -452,7 +458,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     }
     if (
       authLoading ||
-      !session ||
+      !signedIn ||
       !isStaff ||
       !scheduleFilter?.venueId ||
       !scheduleFilter.sportId
@@ -475,7 +481,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     return () => {
       cancelled = true;
     };
-  }, [supabase, authLoading, session, isStaff, scheduleFilter]);
+  }, [supabase, authLoading, signedIn, isStaff, scheduleFilter]);
 
   useEffect(() => {
     if (!supabase || !session || !isStaff || !selectedVenueId) {
@@ -532,7 +538,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   );
 
   const slotEditorUserIdKey = useMemo(() => {
-    if (role !== "superadmin" || !session) {
+    if (role !== "superadmin" || !signedIn) {
       return "";
     }
     return [
@@ -544,14 +550,14 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     ]
       .sort()
       .join("|");
-  }, [cells, role, session]);
+  }, [cells, role, signedIn]);
 
   const [slotEditorLabels, setSlotEditorLabels] = useState<Map<string, string>>(
     () => new Map(),
   );
 
   useEffect(() => {
-    if (role !== "superadmin" || !session) {
+    if (role !== "superadmin" || !signedIn) {
       setSlotEditorLabels(new Map());
       return;
     }
@@ -564,7 +570,10 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
       return;
     }
     let cancelled = false;
-    void resolveSlotEditorUsernames(ids)
+    void import("@/app/(app)/slots/actions")
+      .then(({ resolveSlotEditorUsernames }) =>
+        resolveSlotEditorUsernames(ids),
+      )
       .then((record) => {
         if (cancelled) {
           return;
@@ -579,7 +588,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     return () => {
       cancelled = true;
     };
-  }, [slotEditorUserIdKey, role, session]);
+  }, [slotEditorUserIdKey, role, signedIn]);
 
   const [edit, setEdit] = useState<{
     slotKey: string;
@@ -727,7 +736,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
 
   return (
     <div className="space-y-3">
-      {session && isStaff && (role === "superadmin" || role === "admin") ? (
+      {signedIn && isStaff && (role === "superadmin" || role === "admin") ? (
         <ScheduleVenueHeader
           role={role === "superadmin" ? "superadmin" : "admin"}
           venues={venueOptions}
@@ -769,7 +778,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         />
       ) : null}
 
-      {authLoading ? (
+      {authLoading && !user ? (
         <p className="text-sm text-[var(--text-muted)]">Checking your session…</p>
       ) : loading ? (
         <p className="text-sm text-[var(--text-muted)]">
@@ -793,7 +802,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         </p>
       ) : null}
 
-      {session && isStaff && isPastScheduleDay ? (
+      {signedIn && isStaff && isPastScheduleDay ? (
         <p
           className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-100/90"
           role="status"
@@ -803,7 +812,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         </p>
       ) : null}
 
-      {session &&
+      {signedIn &&
       isStaff &&
       role === "admin" &&
       !canEditAssignedVenue &&

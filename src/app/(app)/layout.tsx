@@ -1,9 +1,17 @@
 import { AdminShell } from "@/components/layout/admin-shell";
+import { RoleProvider } from "@/components/providers/role-provider";
+import { getStaffAuthContextForLayout } from "@/lib/auth/staff-auth-context";
 
-export default function AppLayout({
+export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <AdminShell>{children}</AdminShell>;
+  const initial = await getStaffAuthContextForLayout();
+
+  return (
+    <RoleProvider initial={initial}>
+      <AdminShell>{children}</AdminShell>
+    </RoleProvider>
+  );
 }

@@ -1,71 +1,57 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { useSearchParams } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { useEffect, useState } from "react";
 import { LayoutGrid } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/client";
-import {
-  mapAuthSignInErrorForUsernameUi,
-  usernameToAuthEmail,
-} from "@/lib/username-auth";
+import { signInAction } from "@/app/auth/actions";
+import { LOGIN_SESSION_EXPIRED_PARAM } from "@/lib/auth/constants";
+import { hasSupabaseEnv } from "@/lib/auth/supabase-env";
 
 export function LoginClient() {
-  const router = useRouter();
-  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [error, setError] = useState<string | null>(() =>
+    hasSupabaseEnv()
+      ? null
+      : "Missing Supabase settings. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env.local.",
+  );
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
-    try {
-      setSupabase(createClient());
-    } catch {
+    if (searchParams.get("error") === LOGIN_SESSION_EXPIRED_PARAM) {
       setError(
-        "This deployment is missing Supabase settings. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in Vercel (or .env.local locally).",
+        "Your session expired or was signed in elsewhere. Please sign in again.",
       );
     }
-  }, []);
+  }, [searchParams]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    if (!supabase) {
+    if (!hasSupabaseEnv()) {
       return;
     }
+
     setPending(true);
     try {
-      const fd = new FormData(e.currentTarget);
-      const username = String(fd.get("username") ?? "");
-      const password = String(fd.get("password") ?? "");
-      let email: string;
-      try {
-        email = usernameToAuthEmail(username);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Invalid username.");
-        return;
+      const formData = new FormData(e.currentTarget);
+      const result = await signInAction(
+        formData,
+        searchParams.get("next"),
+      );
+      if (result?.error) {
+        setError(result.error);
+        setPending(false);
       }
-
-      await supabase.auth.signOut({ scope: "local" });
-
-      const { error: signInErr } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (signInErr) {
-        setError(mapAuthSignInErrorForUsernameUi(signInErr.message));
-        return;
+    } catch (err) {
+      if (isRedirectError(err)) {
+        throw err;
       }
-
-      router.push("/slots");
-      router.refresh();
-    } catch (unexpected) {
       setError(
-        unexpected instanceof Error
-          ? unexpected.message
+        err instanceof Error
+          ? err.message
           : "Could not reach sign-in. Check your network, Supabase URL, and API key in .env.local.",
       );
-    } finally {
       setPending(false);
     }
   }
@@ -89,7 +75,7 @@ export function LoginClient() {
           </div>
         </div>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <label
               htmlFor="username"
@@ -136,13 +122,13 @@ export function LoginClient() {
             </p>
           ) : null}
 
-          <Button
+          <button
             type="submit"
-            disabled={pending || !supabase}
-            className="w-full rounded-xl bg-[var(--accent)] py-6 text-base font-bold text-[var(--accent-foreground)] hover:brightness-105 disabled:opacity-60"
+            disabled={pending || !hasSupabaseEnv()}
+            className="w-full rounded-xl bg-[var(--accent)] py-6 text-base font-bold text-[var(--accent-foreground)] hover:brightness-105 disabled:opacity-60 disabled:pointer-events-none"
           >
             {pending ? "Signing in…" : "Sign in"}
-          </Button>
+          </button>
         </form>
       </div>
     </div>

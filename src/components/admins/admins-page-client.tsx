@@ -9,6 +9,7 @@ import {
   type CreateAdminState,
 } from "@/app/(app)/admins/actions";
 import { Button } from "@/components/ui/button";
+import { ServiceRoleSetupNotice } from "@/components/supabase/service-role-setup-notice";
 import type {
   StaffDirectoryRow,
   VenueOption,
@@ -28,10 +29,16 @@ export function AdminsPageClient({
   rows,
   venues,
   currentUserId,
+  canManageStaff,
+  needsUsernameSetupHint,
 }: {
   rows: StaffDirectoryRow[];
   venues: VenueOption[];
   currentUserId: string;
+  /** Auth Admin API: create/delete staff logins */
+  canManageStaff: boolean;
+  /** Some rows lack login_username and service role is not set */
+  needsUsernameSetupHint: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [createState, createAction, createPending] = useActionState(
@@ -76,9 +83,35 @@ export function AdminsPageClient({
         </p>
       </div>
 
-      <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-6">
+      {!canManageStaff ? (
+        <ServiceRoleSetupNotice forFeature="create or remove staff logins" />
+      ) : null}
+
+      {needsUsernameSetupHint ? (
+        <p className="text-sm text-[var(--text-muted)]" role="status">
+          Some login handles show as short ids until you add{" "}
+          <code className="rounded bg-black/25 px-1 text-xs">
+            SUPABASE_SERVICE_ROLE_KEY
+          </code>{" "}
+          (steps above)           or run{" "}
+          <code className="text-xs">
+            docs/supabase/staff_roles_login_username.sql
+          </code>{" "}
+          in the Supabase SQL Editor.
+        </p>
+      ) : null}
+
+      <section
+        className={`rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-6 ${!canManageStaff ? "opacity-90" : ""}`}
+        aria-disabled={!canManageStaff}
+      >
         <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--text-muted)]">
           Invite admin
+          {!canManageStaff ? (
+            <span className="ml-2 font-normal normal-case text-[var(--text-muted)]">
+              (complete setup above)
+            </span>
+          ) : null}
         </h2>
         <form ref={formRef} action={createAction} className="mt-4 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -94,9 +127,10 @@ export function AdminsPageClient({
                 name="username"
                 type="text"
                 required
+                disabled={!canManageStaff}
                 autoComplete="off"
                 placeholder="court_lead"
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30"
+                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
             <div className="space-y-2">
@@ -111,10 +145,11 @@ export function AdminsPageClient({
                 name="password"
                 type="password"
                 required
+                disabled={!canManageStaff}
                 minLength={6}
                 autoComplete="new-password"
                 placeholder="••••••••"
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30"
+                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
             <div className="space-y-2">
@@ -146,7 +181,7 @@ export function AdminsPageClient({
                 id="admin-venue"
                 name="venueId"
                 required
-                disabled={venues.length === 0}
+                disabled={!canManageStaff || venues.length === 0}
                 defaultValue=""
                 className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -184,7 +219,7 @@ export function AdminsPageClient({
 
           <Button
             type="submit"
-            disabled={createPending}
+            disabled={!canManageStaff || createPending}
             className="rounded-xl bg-[var(--accent)] px-6 py-5 text-sm font-bold text-[var(--accent-foreground)] hover:brightness-105 disabled:opacity-60"
           >
             {createPending ? "Creating…" : "Create admin"}
@@ -433,7 +468,7 @@ export function AdminsPageClient({
                             </span>
                           </Button>
                         ) : null}
-                        {canDelete ? (
+                        {canDelete && canManageStaff ? (
                           <form action={mutationAction}>
                             <input type="hidden" name="intent" value="delete" />
                             <input type="hidden" name="userId" value={a.userId} />
