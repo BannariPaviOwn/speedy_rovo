@@ -31,6 +31,13 @@ export type ScheduleCell = {
   tillDate?: string;
   /** Auth user who last saved this slot (`court_slot_entries.updated_by`). */
   updatedByUserId?: string;
+  /** Booking length from DB (`court_slot_entries.duration_minutes`). */
+  durationMinutes?: number;
+  /**
+   * For multi-row bookings: `start_time` key of the DB row (`HH:MM`).
+   * Continuation cells share the same anchor as the first row.
+   */
+  slotAnchorTimeKey?: string;
 };
 
 const allBlocked: ScheduleCell = {

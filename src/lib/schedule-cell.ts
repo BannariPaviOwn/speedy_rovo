@@ -23,6 +23,12 @@ export function cellFromForm(
         label: "BOOKED",
         subtitle: sub || "Open slot",
       };
+    case "coaching":
+      return {
+        kind: "coaching",
+        label: "COACHING",
+        subtitle: sub || "—",
+      };
     case "reserved":
       return {
         kind: "reserved",
@@ -39,6 +45,12 @@ export function cellFromForm(
       return {
         kind: "blocked",
         label: "BLOCKED",
+        subtitle: sub || "—",
+      };
+    case "cancelled":
+      return {
+        kind: "cancelled",
+        label: "CANCELLED",
         subtitle: sub || "—",
       };
     case "membership":

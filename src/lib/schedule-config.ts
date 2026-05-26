@@ -37,3 +37,16 @@ export function generateSlotTimes(
   }
   return out;
 }
+
+/** Add minutes to an `HH:MM` key (same calendar day). */
+export function addMinutesToTimeKey(key: string, addMinutes: number): string {
+  const [h, m] = key.split(":").map((x) => Number(x));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) {
+    return key;
+  }
+  let total = h * 60 + m + addMinutes;
+  total = ((total % 1440) + 1440) % 1440;
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}

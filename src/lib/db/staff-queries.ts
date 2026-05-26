@@ -38,3 +38,33 @@ export async function fetchStaffRole(
   const ctx = await fetchStaffContext(supabase, userId);
   return ctx?.role ?? null;
 }
+
+export type VenueAdminContact = {
+  userId: string;
+  /** E.164-ish or local format as stored */
+  contactPhone: string | null;
+};
+
+/** Active venue admins for schedule “contact” strip (RLS: same venue or superadmin). */
+export async function fetchVenueAdminContacts(
+  supabase: SupabaseClient,
+  venueId: string,
+): Promise<VenueAdminContact[]> {
+  const { data, error } = await supabase
+    .from("staff_roles")
+    .select("user_id, contact_phone")
+    .eq("role", "admin")
+    .eq("venue_id", venueId)
+    .eq("is_active", true)
+    .eq("status", "active")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((r) => ({
+    userId: r.user_id as string,
+    contactPhone: (r.contact_phone as string | null) ?? null,
+  }));
+}

@@ -33,6 +33,7 @@ export type CourtRow = {
   slug: string;
   label: string;
   sort_order: number;
+  sport_id: string;
   is_active: boolean;
   status: string;
   created_at: string;
@@ -51,6 +52,7 @@ export type CourtSlotEntryRow = {
   subtitle: string | null;
   membership_detail: string | null;
   notes: string | null;
+  duration_minutes: number;
   status: string;
   is_active: boolean;
   created_at: string;

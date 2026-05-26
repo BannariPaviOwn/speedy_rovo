@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import {
   createAdminUser,
   deleteStaffMember,
+  updateAdminContactPhone,
   updateAdminVenueScope,
 } from "@/lib/staff-admin-server";
 
@@ -33,6 +34,9 @@ export async function adminStaffMutationAction(
     if (intent === "update_venue") {
       const venueId = String(formData.get("venueId") ?? "");
       await updateAdminVenueScope({ userId, venueId });
+    } else if (intent === "update_phone") {
+      const contactPhone = String(formData.get("contactPhone") ?? "");
+      await updateAdminContactPhone({ userId, contactPhone });
     } else if (intent === "delete") {
       await deleteStaffMember(userId);
     } else {
@@ -41,14 +45,15 @@ export async function adminStaffMutationAction(
     revalidatePath("/admins");
     return mutationOk;
   } catch (e) {
+    const fallback =
+      intent === "delete"
+        ? "Could not remove admin."
+        : intent === "update_phone"
+          ? "Could not update mobile number."
+          : "Could not update venue scope.";
     return {
       ok: false,
-      error:
-        e instanceof Error
-          ? e.message
-          : intent === "delete"
-            ? "Could not remove admin."
-            : "Could not update venue scope.",
+      error: e instanceof Error ? e.message : fallback,
     };
   }
 }
@@ -61,7 +66,8 @@ export async function createAdminAction(
     const username = String(formData.get("username") ?? "");
     const password = String(formData.get("password") ?? "");
     const venueId = String(formData.get("venueId") ?? "");
-    await createAdminUser({ username, password, venueId });
+    const contactPhone = String(formData.get("contactPhone") ?? "");
+    await createAdminUser({ username, password, venueId, contactPhone });
     revalidatePath("/admins");
     return { ok: true, error: null };
   } catch (e) {

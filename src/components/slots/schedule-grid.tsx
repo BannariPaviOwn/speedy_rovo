@@ -13,6 +13,8 @@ const cellEdge =
 const kindInner: Record<SlotKind, string> = {
   booked:
     "border border-[var(--accent)]/45 bg-[var(--slot-booked)] text-[var(--accent)] shadow-[0_0_20px_-8px_rgba(193,255,0,0.35)]",
+  coaching:
+    "border border-sky-400/50 bg-sky-950/55 text-sky-100 ring-1 ring-sky-400/20 shadow-[inset_0_1px_0_rgba(125,211,252,0.12)]",
   reserved:
     "border border-purple-500/40 bg-[var(--slot-reserved)] text-purple-100",
   maintenance:
@@ -23,14 +25,18 @@ const kindInner: Record<SlotKind, string> = {
     "border border-rose-600/45 bg-rose-950/70 text-rose-100 ring-1 ring-rose-500/25",
   membership:
     "border border-violet-500/45 bg-violet-950/55 text-violet-100 ring-1 ring-violet-500/18",
+  cancelled:
+    "border border-amber-400/55 bg-amber-900/30 text-amber-50 ring-1 ring-amber-400/35 shadow-[inset_0_1px_0_rgba(253,230,138,0.12)]",
 };
 
 const defaultLabel: Record<Exclude<SlotKind, "available">, string> = {
   booked: "BOOKED",
+  coaching: "COACHING",
   reserved: "RESERVED",
   maintenance: "MAINTENANCE",
   blocked: "BLOCKED",
   membership: "MEMBERSHIP",
+  cancelled: "CANCELLED",
 };
 
 function SlotEditorFooter({ label }: { label: string }) {
@@ -136,9 +142,17 @@ export function ScheduleLegend({ className }: { className?: string }) {
   const items: { k: string; dot: string }[] = [
     { k: "Blocked", dot: "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.35)]" },
     { k: "Booked", dot: "bg-[var(--accent)] shadow-[0_0_8px_rgba(193,255,0,0.45)]" },
+    {
+      k: "Coaching",
+      dot: "bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.45)]",
+    },
     { k: "Membership", dot: "bg-violet-500" },
     { k: "Maintenance", dot: "bg-rose-400" },
     { k: "Reserved", dot: "bg-purple-500" },
+    {
+      k: "Cancelled",
+      dot: "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]",
+    },
     {
       k: "Available",
       dot: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.35)]",
@@ -167,6 +181,7 @@ export function ScheduleGrid({
   onSlotClick,
   startHour = SCHEDULE_START_HOUR,
   endHour = SCHEDULE_END_HOUR,
+  slotStepMinutes = SLOT_STEP_MINUTES,
   showSlotEditors,
   editorLabelByUserId,
 }: {
@@ -182,12 +197,15 @@ export function ScheduleGrid({
   startHour?: number;
   /** Exclusive end hour (1–24). */
   endHour?: number;
+  /** Row step (30 or 60) — must match selected sport at the venue. */
+  slotStepMinutes?: number;
   /** When true (e.g. superadmin), show who last updated each slot when known. */
   showSlotEditors?: boolean;
   /** Map from `updated_by` user id → display username. */
   editorLabelByUserId?: Map<string, string>;
 }) {
-  const times = generateSlotTimes(startHour, endHour, SLOT_STEP_MINUTES);
+  const step = slotStepMinutes > 0 ? slotStepMinutes : SLOT_STEP_MINUTES;
+  const times = generateSlotTimes(startHour, endHour, step);
 
   const defaultCell: ScheduleCell = {
     kind: "blocked",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Phone, Trash2 } from "lucide-react";
 import {
   adminStaffMutationAction,
   createAdminAction,
@@ -44,6 +44,9 @@ export function AdminsPageClient({
   );
 
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingPhoneUserId, setEditingPhoneUserId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     if (createState.ok) {
@@ -54,6 +57,7 @@ export function AdminsPageClient({
   useEffect(() => {
     if (mutationState.ok) {
       setEditingUserId(null);
+      setEditingPhoneUserId(null);
     }
   }, [mutationState.ok]);
 
@@ -66,8 +70,9 @@ export function AdminsPageClient({
           Admins
         </h1>
         <p className="mt-2 max-w-2xl text-[var(--text-muted)]">
-          Create venue admins with a username, password, and which venue they
-          manage. Change an admin&apos;s venue or remove their access below.
+          Create venue admins with username, password, mobile number, and venue.
+          Their number appears on the schedule for that venue. You can change
+          venue, mobile, or remove access below.
         </p>
       </div>
 
@@ -76,7 +81,7 @@ export function AdminsPageClient({
           Invite admin
         </h2>
         <form ref={formRef} action={createAction} className="mt-4 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2">
               <label
                 htmlFor="admin-username"
@@ -112,7 +117,25 @@ export function AdminsPageClient({
                 className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30"
               />
             </div>
-            <div className="space-y-2 sm:col-span-2 lg:col-span-1">
+            <div className="space-y-2">
+              <label
+                htmlFor="admin-mobile"
+                className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]"
+              >
+                Mobile number
+              </label>
+              <input
+                id="admin-mobile"
+                name="contactPhone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                required
+                placeholder=""
+                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30"
+              />
+            </div>
+            <div className="space-y-2">
               <label
                 htmlFor="admin-venue"
                 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]"
@@ -189,6 +212,7 @@ export function AdminsPageClient({
               <th className="hidden px-4 py-3 font-medium sm:table-cell">
                 Venue scope
               </th>
+              <th className="px-4 py-3 font-medium">Mobile</th>
               <th className="px-4 py-3 font-medium">Access</th>
               <th className="hidden px-4 py-3 font-medium lg:table-cell">
                 Row audit
@@ -200,7 +224,7 @@ export function AdminsPageClient({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-4 py-6 text-[var(--text-muted)]"
                 >
                   No staff accounts yet.
@@ -216,6 +240,7 @@ export function AdminsPageClient({
                   !isSelf &&
                   (a.role === "admin" || canDeleteSuperadmin);
                 const editing = editingUserId === a.userId;
+                const editingPhone = editingPhoneUserId === a.userId;
 
                 return (
                   <tr
@@ -281,6 +306,74 @@ export function AdminsPageClient({
                         (a.venueName ?? "—")
                       )}
                     </td>
+                    <td className="max-w-[11rem] px-4 py-4 text-[var(--text-muted)]">
+                      {isAdminRole ? (
+                        editingPhone ? (
+                          <form
+                            action={mutationAction}
+                            className="flex flex-col gap-2"
+                          >
+                            <input
+                              type="hidden"
+                              name="intent"
+                              value="update_phone"
+                            />
+                            <input type="hidden" name="userId" value={a.userId} />
+                            <input
+                              name="contactPhone"
+                              type="tel"
+                              inputMode="tel"
+                              autoComplete="tel"
+                              defaultValue={a.contactPhone ?? ""}
+                              placeholder="e.g. +91 98765 43210"
+                              disabled={mutationPending}
+                              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/40"
+                            />
+                            <p className="text-[10px] leading-snug text-[var(--text-muted)]">
+                              Leave blank and Save to remove the number from the
+                              schedule.
+                            </p>
+                            <div className="flex gap-1">
+                              <Button
+                                type="submit"
+                                size="sm"
+                                disabled={mutationPending}
+                                className="h-8 rounded-lg bg-[var(--accent)] px-2 text-xs font-bold text-[var(--accent-foreground)]"
+                              >
+                                {mutationPending ? "…" : "Save"}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-lg px-2 text-xs"
+                                onClick={() => setEditingPhoneUserId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+                            <span className="tabular-nums text-[var(--text-primary)]">
+                              {a.contactPhone ?? "—"}
+                            </span>
+                            <button
+                              type="button"
+                              className="w-fit text-left text-[11px] font-bold uppercase tracking-wide text-[var(--accent)] underline-offset-2 hover:underline"
+                              onClick={() => {
+                                setEditingPhoneUserId(a.userId);
+                                setEditingUserId(null);
+                              }}
+                            >
+                              {a.contactPhone ? "Change number" : "Add number"}
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="px-4 py-4 text-[var(--text-muted)]">
                       {a.isActive && a.rowStatus === "active" ? (
                         <span className="text-emerald-200/90">Active</span>
@@ -306,17 +399,38 @@ export function AdminsPageClient({
                     </td>
                     <td className="px-4 py-4 text-right">
                       <div className="flex justify-end gap-1">
-                        {isAdminRole && !editing ? (
+                        {isAdminRole && !editing && !editingPhone ? (
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             className="h-8 rounded-lg px-2"
-                            onClick={() => setEditingUserId(a.userId)}
+                            onClick={() => {
+                              setEditingUserId(a.userId);
+                              setEditingPhoneUserId(null);
+                            }}
                             disabled={venues.length === 0}
                             title="Change venue"
                           >
                             <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+                          </Button>
+                        ) : null}
+                        {isAdminRole && !editingPhone && !editing ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1 rounded-lg px-2"
+                            onClick={() => {
+                              setEditingPhoneUserId(a.userId);
+                              setEditingUserId(null);
+                            }}
+                            title="Edit mobile number"
+                          >
+                            <Phone className="h-3.5 w-3.5" strokeWidth={1.75} />
+                            <span className="hidden text-[10px] font-bold uppercase tracking-wide sm:inline">
+                              Mobile
+                            </span>
                           </Button>
                         ) : null}
                         {canDelete ? (

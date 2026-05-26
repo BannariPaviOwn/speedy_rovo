@@ -59,6 +59,12 @@ export function LoginClient() {
 
       router.push("/slots");
       router.refresh();
+    } catch (unexpected) {
+      setError(
+        unexpected instanceof Error
+          ? unexpected.message
+          : "Could not reach sign-in. Check your network, Supabase URL, and API key in .env.local.",
+      );
     } finally {
       setPending(false);
     }

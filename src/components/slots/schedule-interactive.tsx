@@ -2,13 +2,17 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { resolveSlotEditorUsernames } from "@/app/(app)/slots/actions";
+import {
+  resolveSlotEditorUsernames,
+  resolveVenueAdminUsernames,
+} from "@/app/(app)/slots/actions";
 import { ScheduleGrid } from "@/components/slots/schedule-grid";
 import { SlotEditModal } from "@/components/slots/slot-edit-modal";
+import { ScheduleVenueHeader } from "@/components/slots/schedule-venue-header";
 import { useRole } from "@/components/providers/role-provider";
 import { createClient } from "@/lib/client";
 import { isBeforeToday, toLocalDateString } from "@/lib/date-helpers";
-import { parseSlotKey } from "@/lib/db/mappers";
+import { makeSlotKey, parseSlotKey } from "@/lib/db/mappers";
 import {
   fetchCourtSlugToIdMap,
   fetchCourtsForSchedule,
@@ -16,7 +20,15 @@ import {
   type CourtsScheduleFilter,
   upsertSlotEntry,
 } from "@/lib/db/schedule-queries";
+import {
+  fetchVenueSportsForSchedule,
+  type VenueSportScheduleConfig,
+} from "@/lib/db/sports-queries";
 import { formatSupabaseError } from "@/lib/db/supabase-errors";
+import {
+  fetchVenueAdminContacts,
+  type VenueAdminContact,
+} from "@/lib/db/staff-queries";
 import {
   fetchVenueScheduleWindow,
   fetchVenuesList,
@@ -24,6 +36,8 @@ import {
 import {
   SCHEDULE_END_HOUR,
   SCHEDULE_START_HOUR,
+  SLOT_STEP_MINUTES,
+  addMinutesToTimeKey,
 } from "@/lib/schedule-config";
 import type { CourtInfo, ScheduleCell } from "@/lib/mock-schedule";
 
@@ -76,6 +90,15 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     startHour: number;
     endHour: number;
   } | null>(null);
+  const [venueContacts, setVenueContacts] = useState<VenueAdminContact[]>([]);
+  const [venueContactNames, setVenueContactNames] = useState<
+    Record<string, string>
+  >({});
+  const [venueSportConfigs, setVenueSportConfigs] = useState<
+    VenueSportScheduleConfig[]
+  >([]);
+  const [selectedSportId, setSelectedSportId] = useState<string | null>(null);
+  const [sportsLoading, setSportsLoading] = useState(false);
 
   const venueOptions =
     scheduleVenues.status === "ready" ? scheduleVenues.venues : [];
@@ -84,11 +107,23 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   const slotDate = toLocalDateString(selectedDate);
 
   const scheduleFilter: CourtsScheduleFilter | undefined = useMemo(() => {
-    if ((role === "admin" || role === "superadmin") && selectedVenueId) {
-      return { venueId: selectedVenueId };
+    if (
+      (role === "admin" || role === "superadmin") &&
+      selectedVenueId &&
+      selectedSportId
+    ) {
+      return { venueId: selectedVenueId, sportId: selectedSportId };
     }
     return undefined;
-  }, [role, selectedVenueId]);
+  }, [role, selectedVenueId, selectedSportId]);
+
+  const activeSportConfig = useMemo(
+    () => venueSportConfigs.find((c) => c.sportId === selectedSportId),
+    [venueSportConfigs, selectedSportId],
+  );
+
+  const slotStepMinutes =
+    activeSportConfig?.slotStepMinutes ?? SLOT_STEP_MINUTES;
 
   /** Admins may view any active venue; edits only when selected === assigned venue. */
   const canEditAssignedVenue =
@@ -180,6 +215,47 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   }, [authLoading, role, staffVenueId, supabase]);
 
   useEffect(() => {
+    if (!supabase || !selectedVenueId || !session || !isStaff) {
+      setVenueSportConfigs([]);
+      setSelectedSportId(null);
+      setSportsLoading(false);
+      return;
+    }
+    if (role !== "admin" && role !== "superadmin") {
+      return;
+    }
+    let cancelled = false;
+    setSportsLoading(true);
+    void fetchVenueSportsForSchedule(supabase, selectedVenueId)
+      .then((list) => {
+        if (cancelled) {
+          return;
+        }
+        setVenueSportConfigs(list);
+        setSelectedSportId((prev) => {
+          if (prev && list.some((x) => x.sportId === prev)) {
+            return prev;
+          }
+          return list[0]?.sportId ?? null;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVenueSportConfigs([]);
+          setSelectedSportId(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSportsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, session, isStaff, role, selectedVenueId]);
+
+  useEffect(() => {
     if (authLoading) {
       return;
     }
@@ -264,8 +340,32 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         return;
       }
 
+      if (
+        (role === "admin" || role === "superadmin") &&
+        selectedVenueId &&
+        !selectedSportId
+      ) {
+        if (sportsLoading) {
+          if (!cancelled) {
+            setLoading(true);
+          }
+          return;
+        }
+        setVenueSlotWindow(null);
+        setCourts([]);
+        setCells(new Map());
+        setUsingRemote(false);
+        setInfo(
+          "This venue has no sports configured. Open Venues, edit the venue, and select at least one sport.",
+        );
+        if (!cancelled) {
+          setLoading(false);
+        }
+        return;
+      }
+
       const filter = scheduleFilter;
-      if (!filter?.venueId) {
+      if (!filter?.venueId || !filter.sportId) {
         if (!cancelled) {
           setLoading(false);
         }
@@ -291,6 +391,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
           courtList,
           filter,
           { startHour: startH, endHour: endH },
+          slotStepMinutes,
         );
         if (cancelled) {
           return;
@@ -300,7 +401,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         setUsingRemote(true);
         if (courtList.length === 0) {
           setInfo(
-            "This venue has no active courts yet. Add courts under Venues.",
+            filter.sportId
+              ? "No courts for this sport at this venue. Under Venues, assign this sport to a court or pick another sport above."
+              : "This venue has no active courts yet. Add courts under Venues.",
           );
         }
       } catch (e) {
@@ -336,6 +439,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     selectedVenueId,
     scheduleVenues,
     scheduleFilter,
+    slotStepMinutes,
+    selectedSportId,
+    sportsLoading,
   ]);
 
   const [slugMap, setSlugMap] = useState<Map<string, string>>(new Map());
@@ -344,7 +450,13 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     if (!supabase) {
       return;
     }
-    if (authLoading || !session || !isStaff || !scheduleFilter?.venueId) {
+    if (
+      authLoading ||
+      !session ||
+      !isStaff ||
+      !scheduleFilter?.venueId ||
+      !scheduleFilter.sportId
+    ) {
       setSlugMap(new Map());
       return;
     }
@@ -364,6 +476,60 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
       cancelled = true;
     };
   }, [supabase, authLoading, session, isStaff, scheduleFilter]);
+
+  useEffect(() => {
+    if (!supabase || !session || !isStaff || !selectedVenueId) {
+      setVenueContacts([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchVenueAdminContacts(supabase, selectedVenueId)
+      .then((list) => {
+        if (!cancelled) {
+          setVenueContacts(list);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVenueContacts([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, session, isStaff, selectedVenueId]);
+
+  useEffect(() => {
+    if (!selectedVenueId || venueContacts.length === 0) {
+      setVenueContactNames({});
+      return;
+    }
+    const ids = venueContacts.map((c) => c.userId);
+    let cancelled = false;
+    void resolveVenueAdminUsernames(selectedVenueId, ids)
+      .then((record) => {
+        if (!cancelled) {
+          setVenueContactNames(record);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVenueContactNames({});
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedVenueId, venueContacts]);
+
+  const venueContactsForHeader = useMemo(
+    () =>
+      venueContacts.map((c) => ({
+        ...c,
+        displayName: venueContactNames[c.userId] ?? null,
+      })),
+    [venueContacts, venueContactNames],
+  );
 
   const slotEditorUserIdKey = useMemo(() => {
     if (role !== "superadmin" || !session) {
@@ -462,9 +628,27 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     const cellForGrid =
       user?.id != null ? { ...next, updatedByUserId: user.id } : next;
 
+    const { courtSlug, timeKey } = parseSlotKey(slotKey);
+    const anchor = cellForGrid.slotAnchorTimeKey ?? timeKey;
+    const dur =
+      cellForGrid.durationMinutes && cellForGrid.durationMinutes > 0
+        ? cellForGrid.durationMinutes
+        : slotStepMinutes;
+    const stepsCount = Math.max(1, Math.round(dur / slotStepMinutes));
+
     setCells((prev) => {
       const m = new Map(prev);
-      m.set(slotKey, cellForGrid);
+      for (let i = 0; i < stepsCount; i++) {
+        const tk = addMinutesToTimeKey(anchor, i * slotStepMinutes);
+        const k = makeSlotKey(courtSlug, tk);
+        if (m.has(k)) {
+          m.set(k, {
+            ...cellForGrid,
+            slotAnchorTimeKey: anchor,
+            durationMinutes: dur,
+          });
+        }
+      }
       return m;
     });
     setEdit(null);
@@ -477,8 +661,10 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     }
 
     const filter = scheduleFilter;
-    if (!filter?.venueId) {
-      setError("No venue scope — cannot save. Admins need a venue; superadmins must pick a venue.");
+    if (!filter?.venueId || !filter.sportId) {
+      setError(
+        "Pick a venue and sport before saving slots.",
+      );
       return;
     }
     if (!supabase) {
@@ -505,15 +691,16 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     }
 
     try {
-      const { courtSlug, timeKey } = parseSlotKey(slotKey);
+      const anchorKey = cellForGrid.slotAnchorTimeKey ?? timeKey;
       await upsertSlotEntry(
         supabase,
         {
           slotDate,
           tillDate: till,
           courtSlug,
-          timeKey,
+          timeKey: anchorKey,
           cell: cellForGrid,
+          slotStepMinutes,
         },
         map,
       );
@@ -531,72 +718,55 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     (role === "admin" || role === "superadmin") &&
     scheduleVenues.status === "loading";
 
+  const slotWindowLine =
+    venueSlotWindow && session && isStaff
+      ? `Slot window ${String(venueSlotWindow.startHour).padStart(2, "0")}:00–${String(
+          venueSlotWindow.endHour,
+        ).padStart(2, "0")}:00 (end exclusive)`
+      : null;
+
   return (
     <div className="space-y-3">
       {session && isStaff && (role === "superadmin" || role === "admin") ? (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <span
-            id="venue-field-label"
-            className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]"
-          >
-            {role === "admin" ? "View venue" : "Venue"}
-          </span>
-          {scheduleVenueLoading ? (
-            <select
-              id="schedule-venue"
-              disabled
-              aria-labelledby="venue-field-label"
-              className="w-full max-w-md cursor-wait rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-muted)] sm:ml-auto"
-              aria-busy="true"
-            >
-              <option>Loading venue list…</option>
-            </select>
-          ) : venueOptions.length === 0 ? (
-            <p
-              role="status"
-              aria-labelledby="venue-field-label"
-              className="w-full max-w-md rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/60 px-4 py-3 text-sm text-[var(--text-muted)] sm:ml-auto"
-            >
-              No venues yet. Add one under{" "}
-              <span className="font-medium text-[var(--text-primary)]">Venues</span>
-              .
-            </p>
-          ) : (
-            <select
-              id="schedule-venue"
-              aria-labelledby="venue-field-label"
-              value={selectedVenueId ?? ""}
-              onChange={(e) =>
-                setSelectedVenueId(e.target.value || null)
-              }
-              className="w-full max-w-md rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--accent)]/30 sm:ml-auto"
-            >
-              {venueOptions.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      ) : null}
-
-      {session && isStaff && role === "admin" && adminVenueName ? (
-        <p className="text-sm text-[var(--text-muted)]">
-          <span className="font-semibold text-[var(--text-primary)]">
-            Your assigned venue:
-          </span>{" "}
-          {adminVenueName}
-          {venueSlotWindow ? (
+        <ScheduleVenueHeader
+          role={role === "superadmin" ? "superadmin" : "admin"}
+          venues={venueOptions}
+          selectedVenueId={selectedVenueId}
+          onVenueChange={setSelectedVenueId}
+          loading={scheduleVenueLoading}
+          emptyVenuesMessage={
             <>
-              {" "}
-              · Slot window{" "}
-              {String(venueSlotWindow.startHour).padStart(2, "0")}:00–
-              {String(venueSlotWindow.endHour).padStart(2, "0")}:00 (end
-              exclusive)
+              No venues yet. Add one under{" "}
+              <span className="font-medium text-[var(--text-primary)]">
+                Venues
+              </span>
+              .
             </>
-          ) : null}
-        </p>
+          }
+          contacts={venueContactsForHeader}
+          slotWindowLine={
+            !scheduleVenueLoading && venueOptions.length > 0
+              ? slotWindowLine
+              : null
+          }
+          secondaryLine={
+            role === "admin" && adminVenueName ? (
+              <>
+                <span className="font-medium text-[var(--text-primary)]">
+                  Your assigned venue:
+                </span>{" "}
+                {adminVenueName}
+              </>
+            ) : null
+          }
+          scheduleSports={venueSportConfigs.map((c) => ({
+            id: c.sportId,
+            name: c.name,
+          }))}
+          selectedSportId={selectedSportId}
+          onSportChange={(id) => setSelectedSportId(id)}
+          sportsLoading={sportsLoading}
+        />
       ) : null}
 
       {authLoading ? (
@@ -620,24 +790,6 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
           role="status"
         >
           {error}
-        </p>
-      ) : null}
-
-      {selectedVenueLabel && role === "superadmin" ? (
-        <p className="text-xs text-[var(--text-muted)]">
-          Showing courts for{" "}
-          <span className="font-medium text-[var(--text-primary)]">
-            {selectedVenueLabel}
-          </span>
-          {venueSlotWindow ? (
-            <>
-              {" "}
-              · Slot window{" "}
-              {String(venueSlotWindow.startHour).padStart(2, "0")}:00–
-              {String(venueSlotWindow.endHour).padStart(2, "0")}:00 (end
-              exclusive)
-            </>
-          ) : null}
         </p>
       ) : null}
 
@@ -679,6 +831,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
           cells={cells}
           startHour={venueSlotWindow?.startHour ?? SCHEDULE_START_HOUR}
           endHour={venueSlotWindow?.endHour ?? SCHEDULE_END_HOUR}
+          slotStepMinutes={slotStepMinutes}
           onSlotClick={isStaff && canEditSlots ? handleSlotClick : undefined}
           showSlotEditors={role === "superadmin"}
           editorLabelByUserId={slotEditorLabels}
@@ -699,6 +852,13 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
           timeLabel={edit.timeLabel}
           scheduleDate={slotDate}
           initialCell={edit.cell}
+          anchorTimeKey={
+            edit.cell.slotAnchorTimeKey ?? parseSlotKey(edit.slotKey).timeKey
+          }
+          slotStepMinutes={slotStepMinutes}
+          durationOptionsMinutes={
+            activeSportConfig?.durationOptionsMinutes ?? [slotStepMinutes]
+          }
           onSave={(p) => void handleSave(p)}
           onClose={() => setEdit(null)}
         />

@@ -13,9 +13,19 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
+  const path = request.nextUrl.pathname;
+  const isPublic =
+    path === "/login" || path.startsWith("/login/");
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = publishableKey();
   if (!url || !key) {
+    return supabaseResponse;
+  }
+
+  // Avoid Supabase round-trips on the sign-in page (reduces Edge / proxy timeouts
+  // when the auth API is slow or far from the deployment region).
+  if (isPublic) {
     return supabaseResponse;
   }
 
@@ -40,34 +50,22 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // Do not run code between createServerClient and
-  // supabase.auth.getClaims(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
+  // Single auth check per request (getClaims + getUser doubled latency and timed
+  // out upstream proxies on slow Supabase responses).
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  // IMPORTANT: If you remove getClaims() and you use server-side rendering
-  // with the Supabase client, your users may be randomly logged out.
-  await supabase.auth.getClaims();
+  if (!user) {
+    const loginUrl = new URL("/login", request.url);
+    const returnTo = `${path}${request.nextUrl.search}`;
+    loginUrl.searchParams.set("next", returnTo);
 
-  const path = request.nextUrl.pathname;
-  const isPublic =
-    path === "/login" || path.startsWith("/login/");
-
-  if (!isPublic) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      const loginUrl = new URL("/login", request.url);
-      const returnTo = `${path}${request.nextUrl.search}`;
-      loginUrl.searchParams.set("next", returnTo);
-
-      const redirectResponse = NextResponse.redirect(loginUrl);
-      for (const c of supabaseResponse.cookies.getAll()) {
-        redirectResponse.cookies.set(c.name, c.value);
-      }
-      return redirectResponse;
+    const redirectResponse = NextResponse.redirect(loginUrl);
+    for (const c of supabaseResponse.cookies.getAll()) {
+      redirectResponse.cookies.set(c.name, c.value);
     }
+    return redirectResponse;
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is.

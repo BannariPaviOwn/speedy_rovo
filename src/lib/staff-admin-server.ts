@@ -3,6 +3,19 @@ import { createClient } from "@/lib/server";
 import { createSupabaseAdmin } from "@/lib/supabase-admin";
 import { authEmailToUsername, usernameToAuthEmail } from "@/lib/username-auth";
 
+/** Require at least 10 digits; keep user formatting (spaces, +). */
+export function validateContactPhone(raw: string): string {
+  const t = raw.trim();
+  if (!t) {
+    throw new Error("Mobile number is required.");
+  }
+  const digits = t.replace(/\D/g, "");
+  if (digits.length < 10) {
+    throw new Error("Enter a valid mobile number (at least 10 digits).");
+  }
+  return t;
+}
+
 export type VenueOption = {
   id: string;
   name: string;
@@ -67,6 +80,8 @@ export type StaffDirectoryRow = {
   /** Staff row: who invited / last changed role flags (superadmin). */
   createdByUsername: string | null;
   updatedByUsername: string | null;
+  /** Venue admin contact (shown on schedule). */
+  contactPhone: string | null;
 };
 
 export async function listStaffDirectory(): Promise<StaffDirectoryRow[]> {
@@ -75,7 +90,7 @@ export async function listStaffDirectory(): Promise<StaffDirectoryRow[]> {
   const { data: roles, error } = await admin
     .from("staff_roles")
     .select(
-      "user_id, role, venue_id, created_at, status, is_active, created_by, updated_by",
+      "user_id, role, venue_id, created_at, status, is_active, created_by, updated_by, contact_phone",
     )
     .order("created_at", { ascending: true });
   if (error) {
@@ -96,6 +111,7 @@ export async function listStaffDirectory(): Promise<StaffDirectoryRow[]> {
     is_active: boolean;
     created_by: string | null;
     updated_by: string | null;
+    contact_phone: string | null;
   }[];
 
   const labelMap = await usernamesForUserIds(
@@ -123,6 +139,7 @@ export async function listStaffDirectory(): Promise<StaffDirectoryRow[]> {
         isActive: rel.is_active,
         createdByUsername: cb,
         updatedByUsername: ub,
+        contactPhone: rel.contact_phone ?? null,
       });
       continue;
     }
@@ -137,6 +154,7 @@ export async function listStaffDirectory(): Promise<StaffDirectoryRow[]> {
       isActive: rel.is_active,
       createdByUsername: cb,
       updatedByUsername: ub,
+      contactPhone: rel.contact_phone ?? null,
     });
   }
   return rows;
@@ -147,12 +165,15 @@ export async function createAdminUser(params: {
   password: string;
   /** Required: which venue this admin manages (stored in `staff_roles.venue_id`). */
   venueId: string;
+  /** Shown on the schedule for this venue (required for new admins). */
+  contactPhone: string;
 }): Promise<{ userId: string }> {
   const actor = await assertSuperadmin();
   const admin = createSupabaseAdmin();
   if (!params.username?.trim() || !params.password) {
     throw new Error("Username and password are required.");
   }
+  const contactPhone = validateContactPhone(params.contactPhone);
   if (params.password.length < 6) {
     throw new Error("Password must be at least 6 characters.");
   }
@@ -184,6 +205,7 @@ export async function createAdminUser(params: {
     user_id: created.user.id,
     role: "admin",
     venue_id: venueId,
+    contact_phone: contactPhone,
     status: "active",
     is_active: true,
     created_by: actor.id,
@@ -238,6 +260,37 @@ export async function updateAdminVenueScope(params: {
   const { error } = await admin
     .from("staff_roles")
     .update({ venue_id: venueId, updated_by: actor.id })
+    .eq("user_id", params.userId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function updateAdminContactPhone(params: {
+  userId: string;
+  contactPhone: string;
+}): Promise<void> {
+  const actor = await assertSuperadmin();
+  if (actor.id === params.userId) {
+    throw new Error("Use another superadmin to change your own contact phone.");
+  }
+  const admin = createSupabaseAdmin();
+  const { data: target, error: fetchErr } = await admin
+    .from("staff_roles")
+    .select("user_id, role")
+    .eq("user_id", params.userId)
+    .maybeSingle();
+  if (fetchErr) {
+    throw new Error(fetchErr.message);
+  }
+  if (!target || target.role !== "admin") {
+    throw new Error("Only venue admins have a contact phone to edit.");
+  }
+  const trimmed = params.contactPhone.trim();
+  const value = trimmed === "" ? null : validateContactPhone(trimmed);
+  const { error } = await admin
+    .from("staff_roles")
+    .update({ contact_phone: value, updated_by: actor.id })
     .eq("user_id", params.userId);
   if (error) {
     throw new Error(error.message);

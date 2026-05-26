@@ -12,6 +12,7 @@ export type CourtSlotEntryDbRow = {
   notes: string | null;
   till_date: string | null;
   updated_by: string | null;
+  duration_minutes?: number | null;
 };
 
 /** Grid key used in the UI: `c1::09:00` */
@@ -43,6 +44,11 @@ export function mapCourtSlotEntryToScheduleCell(
   row: CourtSlotEntryDbRow,
 ): ScheduleCell {
   const kind = row.kind;
+  const duration =
+    typeof row.duration_minutes === "number" && row.duration_minutes > 0
+      ? row.duration_minutes
+      : 60;
+  const anchor = normalizeTimeKey(row.start_time);
   const base: ScheduleCell = {
     kind,
     label: row.label ?? undefined,
@@ -51,22 +57,33 @@ export function mapCourtSlotEntryToScheduleCell(
     notes: row.notes ?? undefined,
     tillDate: row.till_date ?? undefined,
     updatedByUserId: row.updated_by ?? undefined,
+    durationMinutes: duration,
+    slotAnchorTimeKey: anchor,
   };
   return base;
 }
 
-export function scheduleCellToDbPayload(cell: ScheduleCell): {
+export function scheduleCellToDbPayload(
+  cell: ScheduleCell,
+  fallbackDurationMinutes = 60,
+): {
   kind: SlotKind;
   label: string | null;
   subtitle: string | null;
   membership_detail: string | null;
   notes: string | null;
+  duration_minutes: number;
 } {
+  const d =
+    typeof cell.durationMinutes === "number" && cell.durationMinutes > 0
+      ? cell.durationMinutes
+      : fallbackDurationMinutes;
   return {
     kind: cell.kind,
     label: cell.label ?? null,
     subtitle: cell.subtitle ?? null,
     membership_detail: cell.membershipDetail ?? null,
     notes: cell.notes ?? null,
+    duration_minutes: d,
   };
 }

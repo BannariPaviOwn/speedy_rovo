@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { VenuesPageClient } from "@/components/venues/venues-page-client";
-import { listVenuesMaster } from "@/lib/venues-server";
+import { listSportsCatalog, listVenuesMaster } from "@/lib/venues-server";
 
 export default async function VenuesPage() {
   try {
-    const rows = await listVenuesMaster();
-    return <VenuesPageClient rows={rows} />;
+    const [rows, sportsCatalog] = await Promise.all([
+      listVenuesMaster(),
+      listSportsCatalog(),
+    ]);
+    return <VenuesPageClient rows={rows} sportsCatalog={sportsCatalog} />;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error";
     if (msg === "Unauthorized") {

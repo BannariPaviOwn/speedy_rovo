@@ -1,15 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SLOT_KIND_OPTIONS, type SlotKind } from "@/lib/types";
 import type { ScheduleCell } from "@/lib/mock-schedule";
 import { cellFromForm, formDefaultsFromCell } from "@/lib/schedule-cell";
+
+function formatDurationLabel(minutes: number): string {
+  if (minutes % 60 === 0 && minutes >= 60) {
+    const h = minutes / 60;
+    return h === 1 ? "1 hour" : `${h} hours`;
+  }
+  if (minutes === 90) {
+    return "1.5 hours";
+  }
+  return `${minutes} min`;
+}
 
 export function SlotEditModal({
   courtName,
   timeLabel,
   scheduleDate,
   initialCell,
+  anchorTimeKey,
+  slotStepMinutes = 60,
+  durationOptionsMinutes = [60],
   onSave,
   onClose,
 }: {
@@ -18,6 +32,12 @@ export function SlotEditModal({
   /** Current grid date `YYYY-MM-DD` (minimum for “apply through”). */
   scheduleDate: string;
   initialCell: ScheduleCell;
+  /** DB row start key (`HH:MM`) when editing a multi-row booking. */
+  anchorTimeKey: string;
+  /** Grid row step for this sport (30 or 60). */
+  slotStepMinutes?: number;
+  /** Allowed booking lengths in minutes (e.g. 60, 90, 120 for cricket). */
+  durationOptionsMinutes?: number[];
   onSave: (payload: { cell: ScheduleCell; tillDate: string }) => void;
   onClose: () => void;
 }) {
@@ -26,6 +46,21 @@ export function SlotEditModal({
   const [membershipDetail, setMembershipDetail] = useState("");
   const [notes, setNotes] = useState("");
   const [tillDate, setTillDate] = useState(scheduleDate);
+  const [durationMinutes, setDurationMinutes] = useState(60);
+
+  const durationChoices = useMemo(() => {
+    const raw =
+      durationOptionsMinutes.length > 0
+        ? durationOptionsMinutes
+        : [slotStepMinutes];
+    const step = slotStepMinutes > 0 ? slotStepMinutes : 60;
+    const out = [...new Set(raw)]
+      .filter((m) => Number.isFinite(m) && m >= step && m % step === 0)
+      .sort((a, b) => a - b);
+    return out.length > 0 ? out : [step];
+  }, [durationOptionsMinutes, slotStepMinutes]);
+
+  const showDuration = durationChoices.length > 1;
 
   useEffect(() => {
     const f = formDefaultsFromCell(initialCell);
@@ -35,7 +70,19 @@ export function SlotEditModal({
     setNotes(f.notes);
     const end = initialCell.tillDate ?? scheduleDate;
     setTillDate(end < scheduleDate ? scheduleDate : end);
-  }, [initialCell, scheduleDate]);
+    const step = slotStepMinutes > 0 ? slotStepMinutes : 60;
+    const fromCell =
+      typeof initialCell.durationMinutes === "number" &&
+      initialCell.durationMinutes >= step &&
+      initialCell.durationMinutes % step === 0
+        ? initialCell.durationMinutes
+        : null;
+    const pick =
+      fromCell && durationChoices.includes(fromCell)
+        ? fromCell
+        : (durationChoices[0] ?? step);
+    setDurationMinutes(pick);
+  }, [initialCell, scheduleDate, slotStepMinutes, durationChoices]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -53,8 +100,14 @@ export function SlotEditModal({
     });
     const end =
       tillDate && tillDate >= scheduleDate ? tillDate : scheduleDate;
+    const anchor = initialCell.slotAnchorTimeKey ?? anchorTimeKey;
     onSave({
-      cell: { ...cell, tillDate: end },
+      cell: {
+        ...cell,
+        tillDate: end,
+        durationMinutes,
+        slotAnchorTimeKey: anchor,
+      },
       tillDate: end,
     });
   };
@@ -86,6 +139,32 @@ export function SlotEditModal({
         </p>
 
         <div className="mt-5 space-y-4">
+          {showDuration ? (
+            <div>
+              <label
+                htmlFor="slot-duration"
+                className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]"
+              >
+                Session length
+              </label>
+              <select
+                id="slot-duration"
+                value={durationMinutes}
+                onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                className="mt-1.5 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/30"
+              >
+                {durationChoices.map((m) => (
+                  <option key={m} value={m}>
+                    {formatDurationLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                Applies from {anchorTimeKey} for this court (same slot step as
+                the grid).
+              </p>
+            </div>
+          ) : null}
           <div>
             <label
               htmlFor="slot-status"
@@ -162,7 +241,11 @@ export function SlotEditModal({
                 placeholder={
                   kind === "booked"
                     ? "e.g. Chen Long (Training)"
-                    : "Short line shown on the cell"
+                    : kind === "coaching"
+                      ? "e.g. Coach Anil · 4 players"
+                      : kind === "cancelled"
+                        ? "e.g. Player withdrew · refund pending"
+                        : "Short line shown on the cell"
                 }
                 className="mt-1.5 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/30"
               />
