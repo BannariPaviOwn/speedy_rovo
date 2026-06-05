@@ -1,9 +1,43 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SLOT_KIND_OPTIONS, type SlotKind } from "@/lib/types";
-import type { ScheduleCell } from "@/lib/mock-schedule";
+import { makeSlotKey } from "@/lib/db/mappers";
+import type { CourtInfo, ScheduleCell } from "@/lib/mock-schedule";
+import { shouldShowIncludeWeekendsOption } from "@/lib/date-helpers";
 import { cellFromForm, formDefaultsFromCell } from "@/lib/schedule-cell";
+import {
+  courtHasSlotConflictAtTime,
+  formatSlotEditHeader,
+} from "@/lib/schedule-slot-conflict";
+import { SLOT_KIND_OPTIONS, type SlotKind } from "@/lib/types";
+
+function shouldShowWeekendOptionForKind(kind: SlotKind): boolean {
+  return (
+    kind === "available" ||
+    kind === "booked" ||
+    kind === "coaching" ||
+    kind === "cancelled" ||
+    kind === "reserved" ||
+    kind === "membership" ||
+    kind === "maintenance" ||
+    kind === "blocked"
+  );
+}
+
+function normalizeDateValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(trimmed);
+  if (!dmy) {
+    return null;
+  }
+
+  const [, day, month, year] = dmy;
+  return `${year}-${month}-${day}`;
+}
 
 function formatDurationLabel(minutes: number): string {
   if (minutes % 60 === 0 && minutes >= 60) {
@@ -18,6 +52,9 @@ function formatDurationLabel(minutes: number): string {
 
 export function SlotEditModal({
   courtName,
+  anchorCourtSlug,
+  courts,
+  cells,
   timeLabel,
   scheduleDate,
   initialCell,
@@ -28,6 +65,12 @@ export function SlotEditModal({
   onClose,
 }: {
   courtName: string;
+  /** Slug of the court cell that was clicked (always included in save). */
+  anchorCourtSlug: string;
+  /** All courts on the current venue/sport grid. */
+  courts: CourtInfo[];
+  /** Live grid cells for conflict hints at `anchorTimeKey`. */
+  cells: Map<string, ScheduleCell>;
   timeLabel: string;
   /** Current grid date `YYYY-MM-DD` (minimum for “apply through”). */
   scheduleDate: string;
@@ -38,7 +81,12 @@ export function SlotEditModal({
   slotStepMinutes?: number;
   /** Allowed booking lengths in minutes (e.g. 60, 90, 120 for cricket). */
   durationOptionsMinutes?: number[];
-  onSave: (payload: { cell: ScheduleCell; tillDate: string }) => void;
+  onSave: (payload: {
+    cell: ScheduleCell;
+    tillDate: string;
+    includeWeekends?: boolean;
+    courtSlugs: string[];
+  }) => void;
   onClose: () => void;
 }) {
   const [kind, setKind] = useState<SlotKind>(initialCell.kind);
@@ -46,7 +94,36 @@ export function SlotEditModal({
   const [membershipDetail, setMembershipDetail] = useState("");
   const [notes, setNotes] = useState("");
   const [tillDate, setTillDate] = useState(scheduleDate);
+  const [includeWeekends, setIncludeWeekends] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(60);
+  const [selectedCourtSlugs, setSelectedCourtSlugs] = useState<Set<string>>(
+    () => new Set([anchorCourtSlug]),
+  );
+
+  useEffect(() => {
+    setSelectedCourtSlugs(new Set([anchorCourtSlug]));
+  }, [anchorCourtSlug, anchorTimeKey]);
+
+  const selectedCount = selectedCourtSlugs.size;
+  const headerLine = formatSlotEditHeader(courtName, selectedCount, timeLabel);
+  const multiCourt = courts.length > 1;
+
+  const conflictBySlug = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const court of courts) {
+      m.set(
+        court.id,
+        courtHasSlotConflictAtTime(cells, court.id, anchorTimeKey),
+      );
+    }
+    return m;
+  }, [courts, cells, anchorTimeKey]);
+
+  const selectedWithConflict = useMemo(
+    () =>
+      [...selectedCourtSlugs].filter((slug) => conflictBySlug.get(slug)),
+    [selectedCourtSlugs, conflictBySlug],
+  );
 
   const durationChoices = useMemo(() => {
     const raw =
@@ -61,6 +138,17 @@ export function SlotEditModal({
   }, [durationOptionsMinutes, slotStepMinutes]);
 
   const showDuration = durationChoices.length > 1;
+
+  const normalizedTill = normalizeDateValue(tillDate);
+  const effectiveTill =
+    normalizedTill && normalizedTill >= scheduleDate
+      ? normalizedTill
+      : scheduleDate;
+
+  const statusAllowsWeekendOption = shouldShowWeekendOptionForKind(kind);
+  const showWeekendOption =
+    statusAllowsWeekendOption &&
+    shouldShowIncludeWeekendsOption(scheduleDate, effectiveTill);
 
   useEffect(() => {
     const f = formDefaultsFromCell(initialCell);
@@ -98,9 +186,16 @@ export function SlotEditModal({
       membershipDetail,
       notes,
     });
+    const normalizedEnd = normalizeDateValue(tillDate);
     const end =
-      tillDate && tillDate >= scheduleDate ? tillDate : scheduleDate;
+      normalizedEnd && normalizedEnd >= scheduleDate
+        ? normalizedEnd
+        : scheduleDate;
     const anchor = initialCell.slotAnchorTimeKey ?? anchorTimeKey;
+    const courtSlugs = [...selectedCourtSlugs];
+    if (!courtSlugs.includes(anchorCourtSlug)) {
+      courtSlugs.unshift(anchorCourtSlug);
+    }
     onSave({
       cell: {
         ...cell,
@@ -109,7 +204,33 @@ export function SlotEditModal({
         slotAnchorTimeKey: anchor,
       },
       tillDate: end,
+      includeWeekends: showWeekendOption ? includeWeekends : true,
+      courtSlugs,
     });
+  };
+
+  const toggleCourt = (slug: string) => {
+    if (slug === anchorCourtSlug) {
+      return;
+    }
+    setSelectedCourtSlugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) {
+        next.delete(slug);
+      } else {
+        next.add(slug);
+      }
+      next.add(anchorCourtSlug);
+      return next;
+    });
+  };
+
+  const selectAllCourts = () => {
+    setSelectedCourtSlugs(new Set(courts.map((c) => c.id)));
+  };
+
+  const clearExtraCourts = () => {
+    setSelectedCourtSlugs(new Set([anchorCourtSlug]));
   };
 
   const showDetailLine =
@@ -134,11 +255,94 @@ export function SlotEditModal({
         >
           Edit slot
         </h2>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {courtName} · {timeLabel}
-        </p>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">{headerLine}</p>
 
         <div className="mt-5 space-y-4">
+          {multiCourt ? (
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 px-3 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Also apply to courts
+                </span>
+                <span className="flex gap-2 text-[11px] font-semibold">
+                  <button
+                    type="button"
+                    onClick={selectAllCourts}
+                    className="text-[var(--accent)] transition hover:brightness-110"
+                  >
+                    Select all
+                  </button>
+                  <span className="text-[var(--text-muted)]">·</span>
+                  <button
+                    type="button"
+                    onClick={clearExtraCourts}
+                    className="text-[var(--text-muted)] transition hover:text-[var(--text-primary)]"
+                  >
+                    Clear
+                  </button>
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">
+                Same status and details at {timeLabel} on each selected court.
+              </p>
+              <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto pr-1">
+                {courts.map((court) => {
+                  const checked = selectedCourtSlugs.has(court.id);
+                  const isAnchor = court.id === anchorCourtSlug;
+                  const conflict = conflictBySlug.get(court.id) ?? false;
+                  const existing = cells.get(
+                    makeSlotKey(court.id, anchorTimeKey),
+                  );
+                  const existingKind = existing?.kind;
+                  return (
+                    <li key={court.id}>
+                      <label
+                        className={[
+                          "flex cursor-pointer items-start gap-2.5 rounded-lg px-1 py-0.5",
+                          isAnchor ? "cursor-default opacity-90" : "",
+                        ].join(" ")}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={isAnchor}
+                          onChange={() => toggleCourt(court.id)}
+                          className="mt-0.5 size-4 shrink-0 rounded border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--accent)] focus:ring-[var(--accent)]/30 disabled:opacity-70"
+                        />
+                        <span className="min-w-0 flex-1 text-sm text-[var(--text-primary)]">
+                          <span className="font-medium">{court.name}</span>
+                          {isAnchor ? (
+                            <span className="ml-1.5 text-[11px] font-normal text-[var(--text-muted)]">
+                              (clicked)
+                            </span>
+                          ) : null}
+                          {conflict ? (
+                            <span className="mt-0.5 block text-[11px] text-amber-200/90">
+                              Part of another session at this time — will be
+                              skipped on save.
+                            </span>
+                          ) : existingKind &&
+                            existingKind !== "blocked" &&
+                            existingKind !== kind ? (
+                            <span className="mt-0.5 block text-[11px] text-[var(--text-muted)]">
+                              Currently {existingKind} — will be overwritten.
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              {selectedWithConflict.length > 0 ? (
+                <p className="mt-2 text-[11px] leading-snug text-amber-200/90">
+                  {selectedWithConflict.length} selected court
+                  {selectedWithConflict.length === 1 ? "" : "s"} overlap another
+                  booking and will not be updated.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {showDuration ? (
             <div>
               <label
@@ -268,10 +472,43 @@ export function SlotEditModal({
               className="mt-1.5 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/30"
             />
             <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">
-              Same court and time on each day from {scheduleDate} through this
-              date.
+              {selectedCount > 1
+                ? `Same time on ${selectedCount} courts, each day from ${scheduleDate} through this date.`
+                : `Same court and time on each day from ${scheduleDate} through this date.`}
+              {showWeekendOption
+                ? " Range is longer than one week and includes weekend days."
+                : null}
+              {showWeekendOption && !includeWeekends
+                ? " Repeats on weekdays (Mon–Fri) only; weekends are skipped."
+                : null}
             </p>
           </div>
+
+          {showWeekendOption ? (
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/50 px-3 py-3">
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  id="slot-include-weekends"
+                  type="checkbox"
+                  checked={includeWeekends}
+                  onChange={(e) => setIncludeWeekends(e.target.checked)}
+                  aria-describedby="slot-include-weekends-hint"
+                  className="mt-0.5 size-4 shrink-0 rounded border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--accent)] focus:ring-[var(--accent)]/30"
+                />
+                <span className="text-sm text-[var(--text-primary)]">
+                  Include weekends
+                </span>
+              </label>
+              <p
+                id="slot-include-weekends-hint"
+                className="mt-1.5 pl-[1.625rem] text-[11px] leading-snug text-[var(--text-muted)]"
+              >
+                {includeWeekends
+                  ? "Applies every calendar day in the range, including Saturdays and Sundays."
+                  : "Applies weekdays only; Saturdays and Sundays in this range are skipped."}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-[var(--border-subtle)] pt-5">
@@ -287,7 +524,9 @@ export function SlotEditModal({
             onClick={handleSave}
             className="rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--accent-foreground)] shadow-lg shadow-[var(--accent)]/15 transition hover:brightness-105"
           >
-            Save slot
+            {selectedCount > 1
+              ? `Save ${selectedCount} courts`
+              : "Save slot"}
           </button>
         </div>
       </div>

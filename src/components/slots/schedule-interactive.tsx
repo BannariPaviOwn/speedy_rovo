@@ -36,6 +36,7 @@ import {
   SLOT_STEP_MINUTES,
   addMinutesToTimeKey,
 } from "@/lib/schedule-config";
+import { courtHasSlotConflictAtTime } from "@/lib/schedule-slot-conflict";
 import type { CourtInfo, ScheduleCell } from "@/lib/mock-schedule";
 
 const SlotEditModal = dynamic(
@@ -614,9 +615,37 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
     [],
   );
 
+  const applyCellToGrid = useCallback(
+    (
+      prev: Map<string, ScheduleCell>,
+      courtSlug: string,
+      anchor: string,
+      dur: number,
+      cellForGrid: ScheduleCell,
+    ) => {
+      const m = new Map(prev);
+      const stepsCount = Math.max(1, Math.round(dur / slotStepMinutes));
+      for (let i = 0; i < stepsCount; i++) {
+        const tk = addMinutesToTimeKey(anchor, i * slotStepMinutes);
+        const k = makeSlotKey(courtSlug, tk);
+        if (m.has(k)) {
+          m.set(k, {
+            ...cellForGrid,
+            slotAnchorTimeKey: anchor,
+            durationMinutes: dur,
+          });
+        }
+      }
+      return m;
+    },
+    [slotStepMinutes],
+  );
+
   const handleSave = async (payload: {
     cell: ScheduleCell;
     tillDate: string;
+    includeWeekends?: boolean;
+    courtSlugs: string[];
   }) => {
     if (!edit || !isStaff) {
       return;
@@ -630,37 +659,61 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
       setEdit(null);
       return;
     }
-    const { cell: next, tillDate: till } = payload;
+    const { cell: next, tillDate: till, includeWeekends, courtSlugs } = payload;
     const slotKey = edit.slotKey;
     setError(null);
+    setInfo(null);
 
     const cellForGrid =
       user?.id != null ? { ...next, updatedByUserId: user.id } : next;
 
-    const { courtSlug, timeKey } = parseSlotKey(slotKey);
+    const { courtSlug: anchorCourtSlug, timeKey } = parseSlotKey(slotKey);
     const anchor = cellForGrid.slotAnchorTimeKey ?? timeKey;
     const dur =
       cellForGrid.durationMinutes && cellForGrid.durationMinutes > 0
         ? cellForGrid.durationMinutes
         : slotStepMinutes;
-    const stepsCount = Math.max(1, Math.round(dur / slotStepMinutes));
+
+    const slugsRequested =
+      courtSlugs.length > 0 ? courtSlugs : [anchorCourtSlug];
+    const slugsUnique = [...new Set(slugsRequested)];
+    if (!slugsUnique.includes(anchorCourtSlug)) {
+      slugsUnique.unshift(anchorCourtSlug);
+    }
+
+    const skippedSlugs: string[] = [];
+    const slugsToApply = slugsUnique.filter((slug) => {
+      if (courtHasSlotConflictAtTime(cells, slug, anchor)) {
+        skippedSlugs.push(slug);
+        return false;
+      }
+      return true;
+    });
+
+    if (slugsToApply.length === 0) {
+      setError(
+        "Could not save — every selected court has another session at this time. Pick fewer courts or choose a different slot.",
+      );
+      return;
+    }
 
     setCells((prev) => {
-      const m = new Map(prev);
-      for (let i = 0; i < stepsCount; i++) {
-        const tk = addMinutesToTimeKey(anchor, i * slotStepMinutes);
-        const k = makeSlotKey(courtSlug, tk);
-        if (m.has(k)) {
-          m.set(k, {
-            ...cellForGrid,
-            slotAnchorTimeKey: anchor,
-            durationMinutes: dur,
-          });
-        }
+      let m = prev;
+      for (const slug of slugsToApply) {
+        m = applyCellToGrid(m, slug, anchor, dur, cellForGrid);
       }
       return m;
     });
     setEdit(null);
+
+    if (skippedSlugs.length > 0) {
+      const skippedNames = skippedSlugs
+        .map((slug) => courts.find((c) => c.id === slug)?.name ?? slug)
+        .join(", ");
+      setInfo(
+        `Saved ${slugsToApply.length} court${slugsToApply.length === 1 ? "" : "s"}. Skipped ${skippedSlugs.length} with an overlapping session: ${skippedNames}.`,
+      );
+    }
 
     if (!usingRemote) {
       setError(
@@ -701,18 +754,35 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
 
     try {
       const anchorKey = cellForGrid.slotAnchorTimeKey ?? timeKey;
-      await upsertSlotEntry(
-        supabase,
-        {
-          slotDate,
-          tillDate: till,
-          courtSlug,
-          timeKey: anchorKey,
-          cell: cellForGrid,
-          slotStepMinutes,
-        },
-        map,
-      );
+      const saveErrors: string[] = [];
+      for (const slug of slugsToApply) {
+        try {
+          await upsertSlotEntry(
+            supabase,
+            {
+              slotDate,
+              tillDate: till,
+              includeWeekends,
+              courtSlug: slug,
+              timeKey: anchorKey,
+              cell: cellForGrid,
+              slotStepMinutes,
+            },
+            map,
+          );
+        } catch (e) {
+          saveErrors.push(
+            `${courts.find((c) => c.id === slug)?.name ?? slug}: ${formatSupabaseError(e)}`,
+          );
+        }
+      }
+      if (saveErrors.length > 0) {
+        setError(
+          saveErrors.length === slugsToApply.length
+            ? `Failed to save slot: ${saveErrors[0]}`
+            : `Some courts did not save: ${saveErrors.join("; ")}`,
+        );
+      }
     } catch (e) {
       setError(
         `Failed to save slot: ${formatSupabaseError(e)}. Sign in or adjust RLS policies if needed.`,
@@ -858,6 +928,9 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
         <SlotEditModal
           key={edit.slotKey}
           courtName={edit.courtName}
+          anchorCourtSlug={parseSlotKey(edit.slotKey).courtSlug}
+          courts={courts}
+          cells={cells}
           timeLabel={edit.timeLabel}
           scheduleDate={slotDate}
           initialCell={edit.cell}

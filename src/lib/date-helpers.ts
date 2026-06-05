@@ -67,3 +67,53 @@ export function eachLocalDateInRangeInclusive(
   }
   return out;
 }
+
+/** Saturday or Sunday in the local calendar for `YYYY-MM-DD`. */
+export function isLocalWeekend(ymd: string): boolean {
+  const day = parseLocalDateString(ymd).getDay();
+  return day === 0 || day === 6;
+}
+
+/**
+ * Inclusive calendar-day count from `startYmd` through `endYmd` (local).
+ * Same day → 1; adjacent days → 2; etc.
+ */
+export function inclusiveLocalDayCount(
+  startYmd: string,
+  endYmd: string,
+): number {
+  return eachLocalDateInRangeInclusive(startYmd, endYmd).length;
+}
+
+/**
+ * True when the inclusive apply-through range spans more than 7 calendar days
+ * (8+ days inclusive, e.g. Mon 1st → Mon 8th).
+ */
+export function isApplyThroughLongerThanOneWeek(
+  startYmd: string,
+  endYmd: string,
+): boolean {
+  return inclusiveLocalDayCount(startYmd, endYmd) > 7;
+}
+
+/** True if any day from `startYmd` through `endYmd` (inclusive) is Sat or Sun. */
+export function localDateRangeIncludesWeekend(
+  startYmd: string,
+  endYmd: string,
+): boolean {
+  return eachLocalDateInRangeInclusive(startYmd, endYmd).some(isLocalWeekend);
+}
+
+/**
+ * Show “Include weekends” when the booked range is longer than one week and
+ * contains at least one Saturday or Sunday (otherwise there is nothing to skip).
+ */
+export function shouldShowIncludeWeekendsOption(
+  startYmd: string,
+  endYmd: string,
+): boolean {
+  return (
+    isApplyThroughLongerThanOneWeek(startYmd, endYmd) &&
+    localDateRangeIncludesWeekend(startYmd, endYmd)
+  );
+}

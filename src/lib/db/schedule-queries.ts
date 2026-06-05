@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { eachLocalDateInRangeInclusive } from "@/lib/date-helpers";
+import {
+  eachLocalDateInRangeInclusive,
+  isLocalWeekend,
+} from "@/lib/date-helpers";
 import {
   SCHEDULE_END_HOUR,
   SCHEDULE_START_HOUR,
@@ -169,12 +172,51 @@ export async function loadScheduleForDate(
   return map;
 }
 
+/** Sat/Sun `YYYY-MM-DD` values between `startYmd` and `endYmd` (inclusive). */
+function weekendDatesInRange(startYmd: string, endYmd: string): string[] {
+  return eachLocalDateInRangeInclusive(startYmd, endYmd).filter(isLocalWeekend);
+}
+
+/**
+ * Removes court slot rows on weekends in the apply-through range so a
+ * weekdays-only save does not leave stale Sat/Sun bookings from earlier saves.
+ */
+async function deleteWeekendSlotEntriesInRange(
+  supabase: SupabaseClient,
+  params: {
+    courtId: string;
+    startTime: string;
+    slotDate: string;
+    tillDate: string;
+  },
+): Promise<void> {
+  const till =
+    params.tillDate >= params.slotDate ? params.tillDate : params.slotDate;
+  const weekendDates = weekendDatesInRange(params.slotDate, till);
+  if (weekendDates.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from("court_slot_entries")
+    .delete()
+    .eq("court_id", params.courtId)
+    .eq("start_time", params.startTime)
+    .in("slot_date", weekendDates);
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function upsertSlotEntry(
   supabase: SupabaseClient,
   params: {
     slotDate: string;
     /** Inclusive last calendar day to apply the same slot (defaults to `slotDate`). */
     tillDate?: string;
+    /** When `false`, skip Saturday/Sunday rows in the range. Omit or `true` = all days. */
+    includeWeekends?: boolean;
     courtSlug: string;
     timeKey: string;
     cell: ScheduleCell;
@@ -195,7 +237,10 @@ export async function upsertSlotEntry(
     params.tillDate && params.tillDate >= params.slotDate
       ? params.tillDate
       : params.slotDate;
-  const dates = eachLocalDateInRangeInclusive(params.slotDate, till);
+  let dates = eachLocalDateInRangeInclusive(params.slotDate, till);
+  if (params.includeWeekends === false) {
+    dates = dates.filter((slot_date) => !isLocalWeekend(slot_date));
+  }
   const [th, tm] = params.timeKey.split(":").map((x) => Number(x));
   const start_time = `${String(th).padStart(2, "0")}:${String(tm | 0).padStart(2, "0")}:00`;
   const cellPayload = scheduleCellToDbPayload(params.cell, step);
@@ -206,6 +251,19 @@ export async function upsertSlotEntry(
     till_date: till,
     ...cellPayload,
   }));
+
+  if (params.includeWeekends === false) {
+    await deleteWeekendSlotEntriesInRange(supabase, {
+      courtId: court_id,
+      startTime: start_time,
+      slotDate: params.slotDate,
+      tillDate: till,
+    });
+  }
+
+  if (rows.length === 0) {
+    return;
+  }
 
   const { error } = await supabase.from("court_slot_entries").upsert(rows, {
     onConflict: "court_id,slot_date,start_time",
