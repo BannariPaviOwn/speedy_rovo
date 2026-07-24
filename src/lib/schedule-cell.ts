@@ -1,6 +1,15 @@
 import type { SlotKind } from "./types";
 import type { ScheduleCell } from "./mock-schedule";
 
+/** Em dash / en dash / hyphen placeholders used as empty cell lines. */
+const PLACEHOLDER_DETAIL = /^(?:—|–|-|−)$/;
+
+/** True when membership detail is empty or only a dash placeholder. */
+export function isBlankMembershipDetail(value: string): boolean {
+  const t = value.trim();
+  return t.length === 0 || PLACEHOLDER_DETAIL.test(t);
+}
+
 /** Builds a cell payload from the edit form. */
 export function cellFromForm(
   kind: SlotKind,
@@ -13,6 +22,7 @@ export function cellFromForm(
   const sub = input.subtitle.trim();
   const md = input.membershipDetail.trim();
   const nt = input.notes.trim();
+  const membershipLine = isBlankMembershipDetail(md) ? "" : md;
 
   switch (kind) {
     case "available":
@@ -57,9 +67,9 @@ export function cellFromForm(
       return {
         kind: "membership",
         label: "MEMBERSHIP",
-        membershipDetail: md || "—",
+        membershipDetail: membershipLine || "—",
         notes: nt,
-        subtitle: [md, nt].filter(Boolean).join(" · ") || "—",
+        subtitle: [membershipLine, nt].filter(Boolean).join(" · ") || "—",
       };
     default:
       return { kind: "available" };
@@ -72,10 +82,12 @@ export function formDefaultsFromCell(cell: ScheduleCell): {
   membershipDetail: string;
   notes: string;
 } {
+  const rawMd = cell.membershipDetail ?? "";
   return {
     kind: cell.kind,
     subtitle: cell.subtitle ?? "",
-    membershipDetail: cell.membershipDetail ?? "",
+    // Don't pre-fill the input with a dash placeholder — show empty + hint instead.
+    membershipDetail: isBlankMembershipDetail(rawMd) ? "" : rawMd,
     notes: cell.notes ?? "",
   };
 }

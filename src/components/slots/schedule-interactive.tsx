@@ -132,6 +132,11 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
   const slotStepMinutes =
     activeSportConfig?.slotStepMinutes ?? SLOT_STEP_MINUTES;
 
+  const durationOptionsMinutes = useMemo(
+    () => activeSportConfig?.durationOptionsMinutes ?? [slotStepMinutes],
+    [activeSportConfig?.durationOptionsMinutes, slotStepMinutes],
+  );
+
   /** Admins may view any active venue; edits only when selected === assigned venue. */
   const canEditAssignedVenue =
     role === "superadmin" ||
@@ -938,9 +943,7 @@ export function ScheduleInteractive({ selectedDate }: ScheduleInteractiveProps) 
             edit.cell.slotAnchorTimeKey ?? parseSlotKey(edit.slotKey).timeKey
           }
           slotStepMinutes={slotStepMinutes}
-          durationOptionsMinutes={
-            activeSportConfig?.durationOptionsMinutes ?? [slotStepMinutes]
-          }
+          durationOptionsMinutes={durationOptionsMinutes}
           onSave={(p) => void handleSave(p)}
           onClose={() => setEdit(null)}
         />
